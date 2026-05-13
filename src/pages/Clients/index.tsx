@@ -20,7 +20,7 @@ export default function Clients() {
   }, []);
 
   const fetchClients = async () => {
-    const { data, error } = await supabase.from('clients').select('*').order('created_at', { ascending: false });
+    const { data } = await supabase.from('clients').select('*').order('created_at', { ascending: false });
     if (data) setClients(data);
   };
 

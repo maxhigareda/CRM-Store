@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, Plus, Edit2, Trash2, X, Check } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -30,7 +30,7 @@ export default function Tags() {
   }, []);
 
   const fetchTags = async () => {
-    const { data, error } = await supabase.from('tags').select('*').eq('type', 'project').order('created_at', { ascending: false });
+    const { data } = await supabase.from('tags').select('*').eq('type', 'project').order('created_at', { ascending: false });
     if (data) setTags(data);
   };
 
@@ -38,7 +38,7 @@ export default function Tags() {
     if (!newTagName.trim()) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('tags').insert([
+      const { error } = await supabase.from('tags').insert([
         { name: newTagName.trim(), color: newTagColor, type: 'project' }
       ]).select();
       

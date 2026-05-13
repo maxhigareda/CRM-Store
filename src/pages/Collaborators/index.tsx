@@ -1,19 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { 
   Search, 
-  Filter, 
   Briefcase, 
-  Clock, 
   TrendingUp, 
   Calendar,
   AlertCircle,
-  CheckCircle2,
-  ChevronRight,
-  UserCheck,
   ChevronDown,
-  Layout,
   Users,
   Trophy,
   AlertTriangle,
@@ -24,7 +18,9 @@ interface CollaboratorStats {
   id: string; // Combined key: profile_id + project_id
   profile_id: string;
   full_name: string;
+  area_id: string;
   area_name: string;
+  email?: string;
   project_id: string;
   project_name: string;
   progress: number;
@@ -39,7 +35,6 @@ interface CollaboratorStats {
 
 export default function Collaborators() {
   const [stats, setStats] = useState<CollaboratorStats[]>([]);
-  const [areas, setAreas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterProject, setFilterProject] = useState('');
@@ -64,7 +59,7 @@ export default function Collaborators() {
       ]);
 
       if (projRes.data) setProjects(projRes.data);
-      if (areasRes.data) setAreas(areasRes.data);
+
 
       if (!profilesRes.data || !tasksRes.data) return;
 
@@ -170,7 +165,7 @@ export default function Collaborators() {
           // The project status was attached in task.projects by the first task processed for this project.
           // Let's get the original project status.
           const projectInfo = tasks.find((t: any) => t.project_id === entry.project_id)?.projects;
-          const projStatus = Array.isArray(projectInfo) ? projectInfo[0]?.status : projectInfo?.status;
+          const projStatus = Array.isArray(projectInfo) ? (projectInfo[0] as any)?.status : (projectInfo as any)?.status;
 
           if (projStatus === 'Finalizado' || projStatus === 'En Pausa') {
             finalStatus = projStatus;

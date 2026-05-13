@@ -85,6 +85,7 @@ interface Project {
   end_date: string;
   duration_weeks: number;
   client_id: string;
+  status?: string;
   clients?: { name: string; reference_name?: string };
   project_phases?: any[];
 }
@@ -270,7 +271,7 @@ export default function Board() {
   if (loading) return <div style={{ padding: '100px', textAlign: 'center', background: '#f8fafc' }}><div className="loading-spinner"></div> Cargando tablero...</div>;
   if (!project) return <div style={{ padding: '100px', textAlign: 'center', background: '#f8fafc' }}>Proyecto no encontrado</div>;
 
-  const projectDaysRemaining = calculateDaysRemaining(project.end_date);
+
   const clientData = Array.isArray(project.clients) ? project.clients[0] : project.clients;
 
   const isHazu = clientData?.name?.toLowerCase().includes('hazu') || clientData?.reference_name?.toLowerCase().includes('hazu');
@@ -516,7 +517,7 @@ function TaskCard({ task, allTags, onClick, isOverlay }: { task: Task, allTags: 
       className={`task-card ${isOverlay ? 'overlay' : ''}`}
       {...attributes}
       {...listeners}
-      onClick={(e) => {
+      onClick={() => {
         if (!isDragging) onClick();
       }}
     >
@@ -734,7 +735,7 @@ function TaskModal({ projectId, task, initialStatus, onClose, allTags, setAllTag
   const [status, setStatus] = useState(task?.status || initialStatus);
   const [startDate, setStartDate] = useState(task?.start_date || new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState(task?.due_date || '');
-  const [dueTime, setDueTime] = useState(task?.due_time || '');
+  const [dueTime] = useState(task?.due_time || '');
   const [selectedLabels, setSelectedLabels] = useState<string[]>(task?.label_ids || []);
   const [assignedTo, setAssignedTo] = useState(task?.assigned_to || '');
   const [priorityLevel, setPriorityLevel] = useState(task?.priority_level || 'media');
@@ -1239,7 +1240,7 @@ function TaskModal({ projectId, task, initialStatus, onClose, allTags, setAllTag
             <div className="form-card" style={{ border: 'none', padding: 0, background: 'transparent' }}>
               <label style={{ fontSize: '0.6rem', fontWeight: 800, color: '#94a3b8', display: 'block', marginBottom: '8px', letterSpacing: '0.05em' }}>ETIQUETAS</label>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
-                {allTags.map(tag => (
+                {allTags.map((tag: any) => (
                   <div key={tag.id} style={{ position: 'relative', display: 'flex' }}>
                     <div 
                       onClick={() => setSelectedLabels(prev => prev.includes(tag.id) ? prev.filter(id => id !== tag.id) : [...prev, tag.id])}

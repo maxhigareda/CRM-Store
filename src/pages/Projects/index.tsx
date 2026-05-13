@@ -12,10 +12,7 @@ import {
   UploadCloud, 
   Calendar, 
   Trash2, 
-  LayoutDashboard, 
-  ListTodo, 
   Paperclip, 
-  Tags,
   Info,
   CalendarDays,
   Settings2,
@@ -42,6 +39,7 @@ interface Project {
   duration_weeks: number;
   end_date: string;
   proposal_url?: string;
+  client_contact_name?: string;
 }
 
 const PHASE_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#ef4444', '#06b6d4'];
