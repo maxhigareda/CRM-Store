@@ -1,15 +1,10 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { 
-  FileText, 
-  Settings, 
-  LayoutTemplate, 
-  Hash, 
-  Users, 
+  FileText,
   UserPlus, 
   LogOut,
   ChevronLeft,
-  UserCheck,
   Building2
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';

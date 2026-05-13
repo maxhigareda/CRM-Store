@@ -1,4 +1,4 @@
-import React from 'react';
+
 
 interface Phase {
   id?: string;
@@ -48,7 +48,7 @@ export default function GanttChart({ kickOffDate, totalWeeks, phases, phaseProgr
 
   // Dynamic week width based on total weeks to avoid scroll on large screens
   // If weeks are few, they take more space. If many, they have a minimum.
-  const minTimelineWidth = displayWeeks * 60; // Reduced from 80 to 60
+
 
   return (
     <div className="gantt-container" style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden', width: '100%' }}>
@@ -79,8 +79,7 @@ export default function GanttChart({ kickOffDate, totalWeeks, phases, phaseProgr
             const widthPct = (phase.duration_weeks / displayWeeks) * 100;
             const color = PHASE_COLORS[idx % PHASE_COLORS.length];
             
-            const startWeek = previousDuration + 1;
-            const endWeek = previousDuration + phase.duration_weeks;
+
             // Removed weekLabel since user wants S1, S2 at top and percentage on bar.
             
             const progress = phase.id && phaseProgress[phase.id] !== undefined ? phaseProgress[phase.id] : 0;
