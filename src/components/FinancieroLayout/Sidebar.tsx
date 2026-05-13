@@ -1,0 +1,67 @@
+import React, { useState } from 'react';
+import { NavLink } from 'react-router-dom';
+import { 
+  FileText, 
+  Settings, 
+  LayoutTemplate, 
+  Hash, 
+  Users, 
+  UserPlus, 
+  LogOut,
+  ChevronLeft,
+  UserCheck,
+  Building2
+} from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+
+export default function FinancieroSidebar() {
+  const { signOut } = useAuth();
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  return (
+    <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
+      <button 
+        className="sidebar-toggle" 
+        onClick={() => setIsCollapsed(!isCollapsed)}
+        title={isCollapsed ? 'Expandir' : 'Colapsar'}
+        style={{ transform: isCollapsed ? 'rotate(180deg)' : 'none' }}
+      >
+        <ChevronLeft size={14} />
+      </button>
+
+      <div className="sidebar-header" style={{ justifyContent: isCollapsed ? 'center' : 'flex-start', padding: '24px 20px', borderBottom: 'none' }}>
+        {isCollapsed ? (
+          <NavLink to="/" className="sidebar-mini-logo" style={{ textDecoration: 'none' }}>SI</NavLink>
+        ) : (
+          <NavLink to="/" style={{ display: 'block' }}>
+            <img src="/logo_store_intelligence%20(1).png" alt="Logo" style={{ height: '24px', maxWidth: '100%', objectFit: 'contain' }} />
+          </NavLink>
+        )}
+      </div>
+      
+      <nav className="sidebar-nav" style={{ overflowY: 'auto' }}>
+        <NavLink to="/financiero/facturas" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Facturas">
+          <FileText size={18} />
+          <span>Facturas</span>
+        </NavLink>
+
+        <div className="nav-section">ADMINISTRACIÓN</div>
+        <NavLink to="/financiero/clients" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Clientes">
+          <Building2 size={18} />
+          <span>Clientes</span>
+        </NavLink>
+        <NavLink to="/financiero/admin" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Usuarios">
+          <UserPlus size={18} />
+          <span>Usuarios</span>
+        </NavLink>
+      </nav>
+
+      <div style={{ padding: '20px', borderTop: '1px solid var(--border-color)' }}>
+        <button className="btn-logout" onClick={signOut}>
+          <LogOut size={18} />
+          {!isCollapsed && <span>Cerrar Sesión</span>}
+        </button>
+      </div>
+    </aside>
+  );
+}
