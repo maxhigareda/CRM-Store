@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { UserPlus, Plus, Trash2, Camera, Loader2, Edit3, Save, X } from 'lucide-react';
-import { ConfirmModal, PromptModal } from '../../components/Modals';
+import { UserPlus, Plus, Trash2, Camera, Loader2, X } from 'lucide-react';
+import { PromptModal } from '../../components/Modals';
 import { createClient } from '@supabase/supabase-js';
 import { useNotification } from '../../contexts/NotificationContext';
 
@@ -15,7 +15,7 @@ interface Profile {
   email: string;
   full_name: string;
   role: string;
-  area_id?: string;
+  area_id?: string | null;
   photo_url?: string;
   modules?: string[];
 }
@@ -31,7 +31,7 @@ export default function Admin() {
   const [areas, setAreas] = useState<Area[]>([]);
   const [loading, setLoading] = useState(true);
   const [newAreaName, setNewAreaName] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
+
   const { showNotification } = useNotification();
 
   // Prompt modal state
@@ -207,7 +207,7 @@ export default function Admin() {
           {areas.map(area => (
             <div key={area.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 18px', background: '#f8fafc', borderRadius: '14px', border: '1px solid #e2e8f0', transition: 'all 0.2s' }}>
               <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1e293b' }}>{area.name}</span>
-              <button onClick={() => handleDeleteArea(area.id)} style={{ border: 'none', background: 'transparent', color: '#94a3b8', cursor: 'pointer', display: 'flex', hover: { color: '#ef4444' } }}>
+              <button onClick={() => handleDeleteArea(area.id)} style={{ border: 'none', background: 'transparent', color: '#94a3b8', cursor: 'pointer', display: 'flex' }}>
                 <Trash2 size={16} />
               </button>
             </div>

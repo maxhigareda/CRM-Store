@@ -1,28 +1,18 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useEffect, useState, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { 
   Plus, 
   Search, 
-  Filter, 
   X, 
-  Calendar, 
   Trash2, 
   MessageSquare, 
-  Paperclip, 
   CheckSquare, 
-  UserPlus, 
   Clock,
   MoreHorizontal,
-  ChevronRight,
-  PlusCircle,
-  FileText,
   Send,
-  Layout,
   Info,
   Briefcase,
-  History,
-  FileCode,
   GripVertical,
   Paperclip as AttachIcon,
   Edit2,
@@ -31,8 +21,7 @@ import {
   Table as TableIcon,
   BarChart3,
   Columns as KanbanIcon,
-  Timer,
-  AlertCircle
+  Timer
 } from 'lucide-react';
 import { 
   DndContext, 
@@ -40,9 +29,7 @@ import {
   PointerSensor, 
   useSensor, 
   useSensors, 
-  rectIntersection,
   DragOverlay,
-  defaultDropAnimationSideEffects,
   KeyboardSensor,
   useDroppable
 } from '@dnd-kit/core';
@@ -97,7 +84,7 @@ const COLUMNS = [
   { id: 'done', title: 'Aprobado', color: '#10b981' }   // Green
 ];
 
-const PHASE_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#ef4444', '#06b6d4'];
+
 const TAG_COLORS = [
   '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#1e293b', '#6366f1', '#14b8a6',
   '#f43f5e', '#84cc16', '#eab308', '#d946ef', '#0ea5e9', '#64748b', '#475569', '#f97316', '#a855f7', '#22c55e',
