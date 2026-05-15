@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Briefcase, Building2, LayoutDashboard, ChevronRight } from 'lucide-react';
 import './home.css';
 
 export default function Home() {
-  const { profile, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const navigate = useNavigate();
   const [shouldRedirect, setShouldRedirect] = useState(false);
 
@@ -32,6 +32,10 @@ export default function Home() {
 
   if (loading) {
     return <div className="home-loading">Cargando tu perfil...</div>;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
   }
 
   if (shouldRedirect) {
