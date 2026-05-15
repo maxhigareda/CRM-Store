@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/api/webhook/:path*",
+      "destination": "https://n8n.myinfo.la/webhook/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

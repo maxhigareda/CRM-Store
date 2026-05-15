@@ -75,7 +75,7 @@ export default function Facturas() {
       const formData = new FormData();
       files.forEach(file => formData.append('files', file));
       
-      const response = await fetch('https://n8n.myinfo.la/webhook/oraculo/clasificador-facturas', { 
+      const response = await fetch('/api/webhook/oraculo/clasificador-facturas', { 
         method: 'POST', 
         body: formData 
       });

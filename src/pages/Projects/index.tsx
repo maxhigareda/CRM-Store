@@ -258,7 +258,7 @@ export default function Projects() {
       const formData = new FormData();
       formData.append('file', file);
       
-      const response = await fetch('https://n8n.myinfo.la/webhook/propuestas', {
+      const response = await fetch('/api/webhook/propuestas', {
         method: 'POST',
         body: formData,
       });
