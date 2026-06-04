@@ -4,6 +4,7 @@ import { NotificationProvider } from './contexts/NotificationContext';
 import Layout from './components/Layout';
 import FinancieroLayout from './components/FinancieroLayout';
 import Login from './pages/Login';
+import ResetPassword from './pages/ResetPassword';
 import Projects from './pages/Projects';
 import Collaborators from './pages/Collaborators';
 import Board from './pages/Board';
@@ -20,6 +21,7 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             
             <Route path="/" element={<Home />} />
             

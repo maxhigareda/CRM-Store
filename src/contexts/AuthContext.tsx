@@ -129,6 +129,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("onAuthStateChange disparado:", event, session ? "Con sesión" : "Sin sesión");
       
+      if (event === 'PASSWORD_RECOVERY') {
+        console.log("Redireccionando a /reset-password por PASSWORD_RECOVERY");
+        if (mounted) {
+          setSession(session);
+          setUser(session?.user ?? null);
+          setLoading(false);
+          clearTimeout(fallbackTimer);
+        }
+        if (window.location.pathname !== '/reset-password') {
+          window.location.href = '/reset-password';
+        }
+        return;
+      }
+
       if (event === 'INITIAL_SESSION') return;
       
       if (!mounted) return;
