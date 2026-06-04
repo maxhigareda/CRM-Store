@@ -40,6 +40,7 @@ interface Project {
   end_date: string;
   proposal_url?: string;
   client_contact_name?: string;
+  priority?: string;
 }
 
 const PHASE_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#ef4444', '#06b6d4'];
@@ -63,6 +64,7 @@ export default function Projects() {
   const [durationWeeks, setDurationWeeks] = useState(1);
   const [endDate, setEndDate] = useState('');
   const [proposalUrl, setProposalUrl] = useState('');
+  const [priority, setPriority] = useState('medium');
   const [clientContactName, setClientContactName] = useState('');
   const [phases, setPhases] = useState<Phase[]>([]);
   const [uploadingProposal, setUploadingProposal] = useState(false);
@@ -116,35 +118,37 @@ export default function Projects() {
 
   const handleOpenModal = async (project?: Project) => {
     if (project) {
-      setEditingId(project.id);
-      setName(project.name);
-      setClientId(project.client_id);
-      setSelectedTags(project.tag_ids || []);
-      setDeliveryDate(project.delivery_date || '');
-      setStatus(project.status || 'todo');
-      setDurationWeeks(project.duration_weeks || 1);
-      setEndDate(project.end_date || '');
-      setProposalUrl(project.proposal_url || '');
-      setClientContactName(project.client_contact_name || '');
-      
-      const { data: phasesData } = await supabase
-        .from('project_phases')
-        .select('*')
-        .eq('project_id', project.id)
-        .order('order_index');
-      setPhases(phasesData || []);
+       setEditingId(project.id);
+       setName(project.name);
+       setClientId(project.client_id);
+       setSelectedTags(project.tag_ids || []);
+       setDeliveryDate(project.delivery_date || '');
+       setStatus(project.status || 'todo');
+       setDurationWeeks(project.duration_weeks || 1);
+       setEndDate(project.end_date || '');
+       setProposalUrl(project.proposal_url || '');
+       setClientContactName(project.client_contact_name || '');
+       setPriority(project.priority || 'medium');
+       
+       const { data: phasesData } = await supabase
+         .from('project_phases')
+         .select('*')
+         .eq('project_id', project.id)
+         .order('order_index');
+       setPhases(phasesData || []);
     } else {
-      setEditingId(null);
-      setName('');
-      setClientId('');
-      setSelectedTags([]);
-      setDeliveryDate('');
-      setStatus('todo');
-      setDurationWeeks(1);
-      setEndDate('');
-      setProposalUrl('');
-      setClientContactName('');
-      setPhases([]);
+       setEditingId(null);
+       setName('');
+       setClientId('');
+       setSelectedTags([]);
+       setDeliveryDate('');
+       setStatus('todo');
+       setDurationWeeks(1);
+       setEndDate('');
+       setProposalUrl('');
+       setClientContactName('');
+       setPriority('medium');
+       setPhases([]);
     }
     setShowPhaseEditor(false);
     setShowModal(true);
@@ -191,7 +195,8 @@ export default function Projects() {
       duration_weeks: durationWeeks,
       end_date: endDate || null,
       proposal_url: proposalUrl || null,
-      client_contact_name: clientContactName || null
+      client_contact_name: clientContactName || null,
+      priority
     };
 
     let savedProjectId = editingId;
@@ -388,6 +393,7 @@ export default function Projects() {
               <th>Cliente</th>
               <th>Propuesta</th>
               <th>Estado</th>
+              <th>Prioridad</th>
               <th>Semanas</th>
               <th>Kick off</th>
               <th>Finalización</th>
@@ -395,9 +401,9 @@ export default function Projects() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{ textAlign: 'center' }}>Cargando...</td></tr>
+              <tr><td colSpan={9} style={{ textAlign: 'center' }}>Cargando...</td></tr>
             ) : filteredProjects.length === 0 ? (
-              <tr><td colSpan={8} style={{ textAlign: 'center' }}>No se encontraron proyectos.</td></tr>
+              <tr><td colSpan={9} style={{ textAlign: 'center' }}>No se encontraron proyectos.</td></tr>
             ) : filteredProjects.map(p => {
               const projectTags = allTags.filter(t => (p.tag_ids || []).includes(t.id));
               const statusInfo = getStatusDisplay(p);
@@ -434,6 +440,14 @@ export default function Projects() {
                   <td>
                     <span className={`status-chip ${statusInfo.class}`}>
                       {statusInfo.label}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="status-chip" style={{ 
+                      backgroundColor: p.priority === 'urgent' ? '#fee2e2' : p.priority === 'high' ? '#ffedd5' : p.priority === 'low' ? '#dcfce7' : '#f1f5f9',
+                      color: p.priority === 'urgent' ? '#991b1b' : p.priority === 'high' ? '#c2410c' : p.priority === 'low' ? '#166534' : '#475569'
+                    }}>
+                      {p.priority === 'urgent' ? '🔴 Urgente' : p.priority === 'high' ? '🟠 Alta' : p.priority === 'low' ? '🟢 Baja' : '🟡 Media'}
                     </span>
                   </td>
                   <td style={{ textAlign: 'center' }}>{p.duration_weeks}</td>
@@ -567,6 +581,16 @@ export default function Projects() {
                         <option value="Finalizado">🔵 Finalizado</option>
                         <option value="Validado">🟢 Validado</option>
                         <option value="Stand by">🟡 Stand by</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '24px' }}>
+                      <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>PRIORIDAD</label>
+                      <select className="form-input" value={priority} onChange={e => setPriority(e.target.value)} style={{ padding: '12px', borderRadius: '14px', border: '2px solid #f1f5f9', fontWeight: 600 }}>
+                        <option value="low">🟢 Baja</option>
+                        <option value="medium">🟡 Media</option>
+                        <option value="high">🟠 Alta</option>
+                        <option value="urgent">🔴 Urgente</option>
                       </select>
                     </div>
 
