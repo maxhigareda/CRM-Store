@@ -87,17 +87,31 @@ export default function Projects() {
   }, [deliveryDate, durationWeeks]);
 
   const fetchData = async () => {
-    const [projRes, clientsRes, tagsRes] = await Promise.all([
-      supabase.from('projects').select('*, clients(name, reference_name)').order('created_at', { ascending: false }),
-      supabase.from('clients').select('*').order('name'),
-      supabase.from('tags').select('*').eq('type', 'project').order('name')
-    ]);
+    try {
+      const fetchPromise = Promise.all([
+        supabase.from('projects').select('*, clients(name, reference_name)').order('created_at', { ascending: false }),
+        supabase.from('clients').select('*').order('name'),
+        supabase.from('tags').select('*').eq('type', 'project').order('name')
+      ]);
+
+      const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error("Timeout al cargar datos")), 10000)
+      );
+
+      const [projRes, clientsRes, tagsRes] = await Promise.race([fetchPromise, timeoutPromise]);
       
-    if (projRes.data) setProjects(projRes.data);
-    if (clientsRes.data) setClients(clientsRes.data);
-    if (tagsRes.data) setAllTags(tagsRes.data);
-    
-    setLoading(false);
+      if (projRes?.error) console.error("Error projects:", projRes.error);
+      if (clientsRes?.error) console.error("Error clients:", clientsRes.error);
+      if (tagsRes?.error) console.error("Error tags:", tagsRes.error);
+        
+      if (projRes?.data) setProjects(projRes.data);
+      if (clientsRes?.data) setClients(clientsRes.data);
+      if (tagsRes?.data) setAllTags(tagsRes.data);
+    } catch (err) {
+      console.error("Error en fetchData (Projects):", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleOpenModal = async (project?: Project) => {
@@ -258,7 +272,7 @@ export default function Projects() {
       const formData = new FormData();
       formData.append('file', file);
       
-      const response = await fetch('/api/webhook/propuestas', {
+      const response = await fetch('https://n8n.myinfo.la/webhook/propuestas', {
         method: 'POST',
         body: formData,
       });

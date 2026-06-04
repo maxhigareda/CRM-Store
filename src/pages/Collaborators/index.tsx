@@ -50,13 +50,19 @@ export default function Collaborators() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [projRes, areasRes, profilesRes, tasksRes, checklistsRes] = await Promise.all([
+      const fetchPromise = Promise.all([
         supabase.from('projects').select('id, name'),
         supabase.from('areas').select('*'),
         supabase.from('profiles').select('id, full_name, email, area_id'),
         supabase.from('tasks').select('id, title, project_id, assigned_to, status, priority, due_date, internal_project_name, projects(name, end_date, status, clients(name, reference_name))'),
         supabase.from('task_checklists').select('task_id, is_completed')
       ]);
+
+      const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error("Timeout al cargar datos de colaboradores")), 10000)
+      );
+
+      const [projRes, areasRes, profilesRes, tasksRes, checklistsRes] = await Promise.race([fetchPromise, timeoutPromise]);
 
       if (projRes.data) setProjects(projRes.data);
 

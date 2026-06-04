@@ -127,13 +127,19 @@ export default function Board() {
   const fetchBoardData = async () => {
     setLoading(true);
     try {
-      const [projRes, tasksRes, profilesRes, tagsRes, internalProjRes] = await Promise.all([
+      const fetchPromise = Promise.all([
         supabase.from('projects').select('*, clients(name, reference_name), project_phases(*)').eq('id', projectId).single(),
         supabase.from('tasks').select('*, profiles(id, full_name, email)').eq('project_id', projectId).order('position'),
         supabase.from('profiles').select('id, full_name, email').order('full_name'),
         supabase.from('tags').select('*').eq('type', 'task').order('name'),
         supabase.from('tasks').select('internal_project_name').not('internal_project_name', 'is', null)
       ]);
+
+      const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error("Timeout al cargar datos del tablero")), 10000)
+      );
+
+      const [projRes, tasksRes, profilesRes, tagsRes, internalProjRes] = await Promise.race([fetchPromise, timeoutPromise]);
 
       if (projRes.data) setProject(projRes.data);
       if (tasksRes.data) {
