@@ -21,6 +21,10 @@ export default function ResetPassword() {
         navigate('/login');
       } else {
         setCheckingSession(false);
+        // Limpiar el hash/query de la URL para que no queden tokens residuales visibles
+        if (window.location.hash || window.location.search) {
+          navigate('/reset-password', { replace: true });
+        }
       }
     };
     checkSession();
@@ -42,18 +46,22 @@ export default function ResetPassword() {
 
     setLoading(true);
     
-    const { error } = await supabase.auth.updateUser({
-      password: password,
-    });
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: password,
+      });
 
-    if (error) {
-      setError(error.message);
+      if (error) {
+        setError(error.message);
+      } else {
+        showNotification('success', 'Contraseña restablecida exitosamente. Por favor inicia sesión con tu nueva contraseña.');
+        supabase.auth.signOut().catch(err => console.error("Error al cerrar sesión:", err));
+        navigate('/login');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Ocurrió un error inesperado');
+    } finally {
       setLoading(false);
-    } else {
-      showNotification('success', 'Contraseña restablecida exitosamente. Por favor inicia sesión con tu nueva contraseña.');
-      // Cerrar sesión para limpiar el token de recuperación y redirigir
-      await supabase.auth.signOut();
-      navigate('/login');
     }
   };
 
