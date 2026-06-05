@@ -18,6 +18,9 @@ interface AuthContextType {
   session: Session | null;
   loading: boolean;
   signOut: () => Promise<void>;
+  impersonatedRole: string | null;
+  canImpersonate: boolean;
+  impersonateRole: (role: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -26,6 +29,9 @@ const AuthContext = createContext<AuthContextType>({
   session: null,
   loading: true,
   signOut: async () => {},
+  impersonatedRole: null,
+  canImpersonate: false,
+  impersonateRole: () => {},
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -33,6 +39,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [impersonatedRole, setImpersonatedRole] = useState<string | null>(null);
+  const [dbRole, setDbRole] = useState<string | null>(null);
 
   const fetchProfile = async (userId: string) => {
     console.log("Iniciando fetchProfile para:", userId);
@@ -46,12 +54,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log("Respuesta de fetchProfile:", { data, error });
       if (!error && data) {
         setProfile(data as UserProfile);
+        setDbRole(data.role);
       } else {
         setProfile(null);
+        setDbRole(null);
       }
     } catch (err) {
       console.error('Error fetching profile:', err);
       setProfile(null);
+      setDbRole(null);
     }
   };
 
@@ -129,6 +140,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("onAuthStateChange disparado:", event, session ? "Con sesión" : "Sin sesión");
       
+      if (event === 'PASSWORD_RECOVERY') {
+        console.log("Redireccionando a /reset-password por PASSWORD_RECOVERY");
+        if (mounted) {
+          setSession(session);
+          setUser(session?.user ?? null);
+          setLoading(false);
+          clearTimeout(fallbackTimer);
+        }
+        if (window.location.pathname !== '/reset-password') {
+          window.location.href = '/reset-password';
+        }
+        return;
+      }
+
       if (event === 'INITIAL_SESSION') return;
       
       if (!mounted) return;
@@ -153,11 +178,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signOut = async () => {
+    setImpersonatedRole(null);
+    setDbRole(null);
     await supabase.auth.signOut();
   };
 
+  const activeProfile = profile ? {
+    ...profile,
+    role: impersonatedRole || profile.role
+  } : null;
+
+  const canImpersonate = dbRole === 'admin';
+  const impersonateRole = (role: string | null) => setImpersonatedRole(role);
+
   return (
-    <AuthContext.Provider value={{ user, profile, session, loading, signOut }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      profile: activeProfile, 
+      session, 
+      loading, 
+      signOut, 
+      impersonatedRole, 
+      canImpersonate, 
+      impersonateRole 
+    }}>
       {children}
     </AuthContext.Provider>
   );

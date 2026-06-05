@@ -50,13 +50,19 @@ export default function Collaborators() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [projRes, areasRes, profilesRes, tasksRes, checklistsRes] = await Promise.all([
+      const fetchPromise = Promise.all([
         supabase.from('projects').select('id, name'),
         supabase.from('areas').select('*'),
         supabase.from('profiles').select('id, full_name, email, area_id'),
         supabase.from('tasks').select('id, title, project_id, assigned_to, status, priority, due_date, internal_project_name, projects(name, end_date, status, clients(name, reference_name))'),
         supabase.from('task_checklists').select('task_id, is_completed')
       ]);
+
+      const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error("Timeout al cargar datos de colaboradores")), 10000)
+      );
+
+      const [projRes, areasRes, profilesRes, tasksRes, checklistsRes] = await Promise.race([fetchPromise, timeoutPromise]);
 
       if (projRes.data) setProjects(projRes.data);
 
@@ -73,11 +79,11 @@ export default function Collaborators() {
       tasks.forEach((task: any) => {
         if (!task.assigned_to || !task.project_id) return;
 
-        const profile = profiles.find(p => p.id === task.assigned_to);
+        const profile = profiles.find((p: any) => p.id === task.assigned_to);
         if (!profile) return;
 
         const projectInfo = Array.isArray(task.projects) ? task.projects[0] : task.projects;
-        const area = areasRes.data?.find(a => a.id === profile.area_id);
+        const area = areasRes.data?.find((a: any) => a.id === profile.area_id);
         const clientData = Array.isArray(projectInfo?.clients) ? projectInfo?.clients[0] : projectInfo?.clients;
         const nameStr = clientData?.name || '';
         const refStr = clientData?.reference_name || '';
@@ -138,10 +144,10 @@ export default function Collaborators() {
         }
         
         // Calculate progress for THIS task based on its checklists
-        const taskChecks = checklists.filter(c => c.task_id === task.id);
+        const taskChecks = checklists.filter((c: any) => c.task_id === task.id);
         let taskProgress = 0;
         if (taskChecks.length > 0) {
-          taskProgress = (taskChecks.filter(c => c.is_completed).length / taskChecks.length) * 100;
+          taskProgress = (taskChecks.filter((c: any) => c.is_completed).length / taskChecks.length) * 100;
         } else if (task.status === 'done' || task.status === 'approved') {
           taskProgress = 100;
         }
