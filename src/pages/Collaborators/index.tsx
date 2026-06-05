@@ -59,7 +59,7 @@ export default function Collaborators() {
       ]);
 
       const timeoutPromise = new Promise<any>((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout al cargar datos de colaboradores")), 10000)
+        setTimeout(() => reject(new Error("Timeout al cargar datos de colaboradores")), 30000)
       );
 
       const [projRes, areasRes, profilesRes, tasksRes, checklistsRes] = await Promise.race([fetchPromise, timeoutPromise]);

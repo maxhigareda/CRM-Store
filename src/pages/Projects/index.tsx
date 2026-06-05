@@ -97,7 +97,7 @@ export default function Projects() {
       ]);
 
       const timeoutPromise = new Promise<any>((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout al cargar datos")), 10000)
+        setTimeout(() => reject(new Error("Timeout al cargar datos")), 30000)
       );
 
       const [projRes, clientsRes, tagsRes] = await Promise.race([fetchPromise, timeoutPromise]);

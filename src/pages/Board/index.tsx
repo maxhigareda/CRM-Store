@@ -136,7 +136,7 @@ export default function Board() {
       ]);
 
       const timeoutPromise = new Promise<any>((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout al cargar datos del tablero")), 10000)
+        setTimeout(() => reject(new Error("Timeout al cargar datos del tablero")), 30000)
       );
 
       const [projRes, tasksRes, profilesRes, tagsRes, internalProjRes] = await Promise.race([fetchPromise, timeoutPromise]);

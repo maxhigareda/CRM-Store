@@ -98,7 +98,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // Forzar recarga limpia hacia el login
       window.location.href = '/login';
-    }, 8000);
+    }, 30000);
 
     const initializeAuth = async () => {
       try {

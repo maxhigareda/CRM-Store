@@ -66,7 +66,7 @@ export default function Admin() {
       ]);
 
       const timeoutPromise = new Promise<[any, any]>((_, reject) => 
-        setTimeout(() => reject(new Error("Supabase timeout (Admin)")), 8000)
+        setTimeout(() => reject(new Error("Supabase timeout (Admin)")), 30000)
       );
 
       const [usersRes, areasRes] = await Promise.race([fetchPromise, timeoutPromise]);

@@ -48,7 +48,7 @@ export default function PlanTrabajo() {
       ]);
 
       const timeoutPromise = new Promise<[any, any, any]>((_, reject) => 
-        setTimeout(() => reject(new Error("Supabase timeout (Plan de Trabajo)")), 10000)
+        setTimeout(() => reject(new Error("Supabase timeout (Plan de Trabajo)")), 30000)
       );
 
       const [projRes, tasksRes, checklistsRes] = await Promise.race([fetchPromise, timeoutPromise]);
