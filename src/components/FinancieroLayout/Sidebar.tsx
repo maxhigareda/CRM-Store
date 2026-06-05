@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { 
+import {
   FileText,
-  UserPlus, 
+  UserPlus,
   LogOut,
   ChevronLeft,
-  Building2
+  Building2,
+  LayoutDashboard,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -35,6 +36,11 @@ export default function FinancieroSidebar() {
       </div>
       
       <nav className="sidebar-nav" style={{ overflowY: 'auto' }}>
+        <NavLink to="/financiero/dashboard" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Dashboard">
+          <LayoutDashboard size={18} />
+          <span>Dashboard</span>
+        </NavLink>
+
         <NavLink to="/financiero/facturas" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Facturas">
           <FileText size={18} />
           <span>Facturas</span>

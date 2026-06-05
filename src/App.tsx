@@ -12,6 +12,7 @@ import Clients from './pages/Clients';
 import Tags from './pages/Tags';
 import Home from './pages/Home';
 import Facturas from './pages/Financiero/Facturas';
+import Dashboard from './pages/Financiero/Dashboard';
 
 function App() {
   return (
@@ -33,7 +34,8 @@ function App() {
             </Route>
 
             <Route path="financiero" element={<FinancieroLayout />}>
-              <Route index element={<Navigate to="facturas" replace />} />
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
               <Route path="facturas" element={<Facturas />} />
               <Route path="clients" element={<Clients />} />
               <Route path="admin" element={<Admin />} />
