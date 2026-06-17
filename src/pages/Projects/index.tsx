@@ -51,6 +51,7 @@ export default function Projects() {
   const [clients, setClients] = useState<any[]>([]);
   const [allTags, setAllTags] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showPhaseEditor, setShowPhaseEditor] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -89,6 +90,8 @@ export default function Projects() {
   }, [deliveryDate, durationWeeks]);
 
   const fetchData = async () => {
+    setLoading(true);
+    setError(null);
     try {
       const fetchPromise = Promise.all([
         supabase.from('projects').select('*, clients(name, reference_name)').order('created_at', { ascending: false }),
@@ -97,20 +100,22 @@ export default function Projects() {
       ]);
 
       const timeoutPromise = new Promise<any>((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout al cargar datos")), 30000)
+        setTimeout(() => reject(new Error("La base de datos está tardando en responder (Timeout)")), 30000)
       );
 
       const [projRes, clientsRes, tagsRes] = await Promise.race([fetchPromise, timeoutPromise]);
       
-      if (projRes?.error) console.error("Error projects:", projRes.error);
-      if (clientsRes?.error) console.error("Error clients:", clientsRes.error);
-      if (tagsRes?.error) console.error("Error tags:", tagsRes.error);
+      if (projRes?.error) throw projRes.error;
+      if (clientsRes?.error) throw clientsRes.error;
+      if (tagsRes?.error) throw tagsRes.error;
         
       if (projRes?.data) setProjects(projRes.data);
       if (clientsRes?.data) setClients(clientsRes.data);
       if (tagsRes?.data) setAllTags(tagsRes.data);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error en fetchData (Projects):", err);
+      setError(err.message || "Error al cargar datos");
+      showNotification('error', 'Error al cargar datos de proyectos: ' + (err.message || ''));
     } finally {
       setLoading(false);
     }
@@ -401,7 +406,29 @@ export default function Projects() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} style={{ textAlign: 'center' }}>Cargando...</td></tr>
+              <tr>
+                <td colSpan={9} style={{ padding: '24px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
+                    <Loader2 className="animate-spin" size={18} />
+                    <span>Cargando proyectos...</span>
+                  </div>
+                </td>
+              </tr>
+            ) : error ? (
+              <tr>
+                <td colSpan={9} style={{ padding: '32px', textAlign: 'center' }}>
+                  <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '12px' }}>
+                    ⚠️ {error}
+                  </div>
+                  <button 
+                    className="btn btn-secondary" 
+                    onClick={() => fetchData()}
+                    style={{ margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                  >
+                    Reintentar
+                  </button>
+                </td>
+              </tr>
             ) : filteredProjects.length === 0 ? (
               <tr><td colSpan={9} style={{ textAlign: 'center' }}>No se encontraron proyectos.</td></tr>
             ) : filteredProjects.map(p => {

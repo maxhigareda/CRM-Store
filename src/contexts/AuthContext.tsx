@@ -69,6 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     console.log("Montando AuthContext useEffect");
     let mounted = true;
+    let authSubscription: { unsubscribe: () => void } | null = null;
     
     // Fallback de seguridad: Si Supabase se cuelga (típicamente deadlock del refresh token),
     // limpiamos el local storage automáticamente para evitar que el usuario tenga que "borrar sus datos" manualmente.
@@ -98,7 +99,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // Forzar recarga limpia hacia el login
       window.location.href = '/login';
-    }, 30000);
+    }, 50000); // 50s para tolerar cold-starts prolongados
 
     const initializeAuth = async () => {
       try {
@@ -130,49 +131,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (mounted) {
           setLoading(false);
           clearTimeout(fallbackTimer);
+
+          // Escuchar cambios de auth sólo tras inicializar la sesión inicial
+          const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+            console.log("onAuthStateChange disparado:", event, newSession ? "Con sesión" : "Sin sesión");
+            
+            if (event === 'PASSWORD_RECOVERY') {
+              console.log("Redireccionando a /reset-password por PASSWORD_RECOVERY");
+              if (mounted) {
+                setSession(newSession);
+                setUser(newSession?.user ?? null);
+                setLoading(false);
+              }
+              if (window.location.pathname !== '/reset-password') {
+                window.location.href = '/reset-password';
+              }
+              return;
+            }
+
+            if (event === 'INITIAL_SESSION') return;
+            
+            if (!mounted) return;
+
+            setSession(newSession);
+            setUser(newSession?.user ?? null);
+            
+            if (newSession?.user) {
+              await fetchProfile(newSession.user.id);
+            } else {
+              setProfile(null);
+            }
+            setLoading(false);
+          });
+
+          authSubscription = subscription;
         }
       }
     };
 
     initializeAuth();
 
-    // Listen for auth changes (ignorar INITIAL_SESSION porque ya lo manejamos con getSession)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("onAuthStateChange disparado:", event, session ? "Con sesión" : "Sin sesión");
-      
-      if (event === 'PASSWORD_RECOVERY') {
-        console.log("Redireccionando a /reset-password por PASSWORD_RECOVERY");
-        if (mounted) {
-          setSession(session);
-          setUser(session?.user ?? null);
-          setLoading(false);
-          clearTimeout(fallbackTimer);
-        }
-        if (window.location.pathname !== '/reset-password') {
-          window.location.href = '/reset-password';
-        }
-        return;
-      }
-
-      if (event === 'INITIAL_SESSION') return;
-      
-      if (!mounted) return;
-
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        await fetchProfile(session.user.id);
-      } else {
-        setProfile(null);
-      }
-      setLoading(false);
-      clearTimeout(fallbackTimer);
-    });
-
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      if (authSubscription) {
+        authSubscription.unsubscribe();
+      }
       clearTimeout(fallbackTimer);
     };
   }, []);
