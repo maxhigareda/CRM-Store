@@ -14,7 +14,9 @@ import Clients from './pages/Clients';
 import Tags from './pages/Tags';
 import Home from './pages/Home';
 import Facturas from './pages/Financiero/Facturas';
+import EstadosCuenta from './pages/Financiero/EstadosCuenta';
 import Dashboard from './pages/Financiero/Dashboard';
+import FacturasTabla from './pages/Financiero/Tablas/Facturas';
 
 function App() {
   return (
@@ -41,6 +43,8 @@ function App() {
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="facturas" element={<Facturas />} />
+              <Route path="estados-cuenta" element={<EstadosCuenta />} />
+              <Route path="tablas/facturas" element={<FacturasTabla />} />
               <Route path="clients" element={<Clients />} />
               <Route path="admin" element={<Admin />} />
             </Route>

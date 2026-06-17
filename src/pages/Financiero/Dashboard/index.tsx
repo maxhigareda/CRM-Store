@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -15,14 +15,9 @@ import { Bar, Doughnut } from 'react-chartjs-2';
 import { Loader2, TrendingUp, TrendingDown, Scale, Receipt, Hash, Wallet } from 'lucide-react';
 import { useNotification } from '../../../contexts/NotificationContext';
 import {
-  parseCSV,
-  computeKPIs,
-  monthlySeries,
-  byCategoria,
-  topProveedores,
-  getMonths,
+  fetchDashboard,
   formatMXN,
-  type Factura,
+  type DashboardData,
 } from './utils';
 
 ChartJS.register(
@@ -115,60 +110,38 @@ function ChartCard({ title, children, style }: { title: string; children: React.
 // ──────────────────────────────────────────────
 export default function Dashboard() {
   const { showNotification } = useNotification();
-  const [allRows, setAllRows] = useState<Factura[]>([]);
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Filtros
+  // Filtros (se mandan como parámetros al RPC server-side)
   const [mesFilter, setMesFilter] = useState<string>('todos');
   const [tipoFilter, setTipoFilter] = useState<string>('todas');
 
+  // Cada cambio de filtro dispara una petición; Postgres agrega y devuelve el JSON.
   useEffect(() => {
-    fetch('/concentrado.csv')
-      .then((r) => {
-        if (!r.ok) throw new Error('No se pudo cargar el CSV');
-        return r.text();
-      })
-      .then((text) => {
-        const rows = parseCSV(text);
-        setAllRows(rows);
-      })
+    let cancelled = false;
+    setLoading(true);
+    fetchDashboard(mesFilter, tipoFilter)
+      .then((d) => { if (!cancelled) setData(d); })
       .catch((err) => {
-        showNotification('error', 'Error al cargar el dashboard: ' + err.message);
+        if (!cancelled) showNotification('error', 'Error al cargar el dashboard: ' + err.message);
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mesFilter, tipoFilter]);
 
-  // Meses únicos para el selector
-  const availableMonths = useMemo(() => getMonths(allRows), [allRows]);
+  // Loader de página completa solo en la primera carga (aún sin datos).
+  if (!data) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 16, color: 'var(--text-muted)' }}>
+        <Loader2 size={40} className="animate-spin" style={{ color: 'var(--primary-color)' }} />
+        <p style={{ fontSize: '1rem' }}>Cargando datos del dashboard…</p>
+      </div>
+    );
+  }
 
-  // Filas filtradas
-  const filtered = useMemo(() => {
-    let rows = allRows;
-    if (mesFilter !== 'todos') {
-      rows = rows.filter((r) => r.fecha.startsWith(mesFilter));
-    }
-    if (tipoFilter === 'emitidas') {
-      rows = rows.filter((r) => r.tipoFactura === 'EMITIDA');
-    } else if (tipoFilter === 'recibidas') {
-      rows = rows.filter((r) => r.tipoFactura === 'RECIBIDA');
-    }
-    return rows;
-  }, [allRows, mesFilter, tipoFilter]);
-
-  const kpis       = useMemo(() => computeKPIs(filtered),       [filtered]);
-  const monthly    = useMemo(() => monthlySeries(filtered),      [filtered]);
-  const categorias = useMemo(() => byCategoria(filtered),        [filtered]);
-  const proveedores = useMemo(() => topProveedores(filtered),    [filtered]);
-
-  // ── Últimas 10 facturas (sin filtrar para tabla) ──
-  const ultimasFacturas = useMemo(() =>
-    [...allRows]
-      .filter((r) => r.tipo !== 'P' && r.total > 0)
-      .sort((a, b) => b.fecha.localeCompare(a.fecha))
-      .slice(0, 10),
-    [allRows],
-  );
+  const { kpis, monthly, categorias, proveedores, ultimas: ultimasFacturas, mesesDisponibles: availableMonths, totalRegistros } = data;
 
   // ── Datos de charts ──
   const monthlyChartData = {
@@ -282,25 +255,17 @@ export default function Dashboard() {
   };
 
   // ─────────────── Render ───────────────
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 16, color: 'var(--text-muted)' }}>
-        <Loader2 size={40} className="animate-spin" style={{ color: 'var(--primary-color)' }} />
-        <p style={{ fontSize: '1rem' }}>Cargando datos del dashboard…</p>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ padding: '24px', maxWidth: 1280, margin: '0 auto' }}>
+    <div style={{ padding: '24px', maxWidth: 1280, margin: '0 auto', opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s' }}>
 
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: 4 }}>
+        <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
           Dashboard Financiero
+          {loading && <Loader2 size={18} className="animate-spin" style={{ color: 'var(--primary-color)' }} />}
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-          Resumen contable de facturas CFDI · {allRows.filter(r => r.tipo !== 'P' && r.total > 0).length} facturas cargadas
+          Resumen contable de facturas CFDI · {totalRegistros.toLocaleString('es-MX')} registros
         </p>
       </div>
 
@@ -473,7 +438,7 @@ export default function Dashboard() {
             <tbody>
               {ultimasFacturas.map((f, i) => (
                 <tr
-                  key={f.uuid || i}
+                  key={i}
                   style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.15s' }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__n8n__search_workflows",
+      "mcp__n8n__get_workflow_details",
+      "Bash(pdftotext -v)",
+      "mcp__n8n__get_sdk_reference",
+      "Bash(python3 *)",
+      "mcp__n8n__validate_workflow",
+      "mcp__n8n__update_workflow"
+    ]
+  }
+}

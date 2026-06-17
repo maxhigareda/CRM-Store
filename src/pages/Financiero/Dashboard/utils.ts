@@ -1,30 +1,8 @@
-import Papa from 'papaparse';
+import { supabase } from '../../../lib/supabase';
 
 // ──────────────────────────────────────────────
-// Tipos
+// Tipos (datos ya agregados que devuelve el RPC dashboard_financiero)
 // ──────────────────────────────────────────────
-export interface Factura {
-  uuid: string;
-  fecha: string;          // "YYYY-MM-DD HH:mm:ss"
-  fechaTimbrado: string;
-  tipo: string;           // "I" | "P" | "E"
-  serie: string;
-  folio: string;
-  emisor: string;
-  rfcEmisor: string;
-  receptor: string;
-  rfcReceptor: string;
-  usoCfdi: string;
-  moneda: string;
-  subtotal: number;
-  total: number;
-  formaPago: string;
-  metodoPago: string;
-  conceptos: string;
-  categoria: string;
-  tipoFactura: string;    // "EMITIDA" | "RECIBIDA"
-}
-
 export interface KPIs {
   totalIngresos: number;
   totalGastos: number;
@@ -35,7 +13,7 @@ export interface KPIs {
 }
 
 export interface MonthlySerie {
-  month: string;
+  month: string;        // "YYYY-MM"
   ingresos: number;
   gastos: number;
 }
@@ -50,124 +28,85 @@ export interface ProveedorTotal {
   total: number;
 }
 
-// ──────────────────────────────────────────────
-// Parser CSV
-// ──────────────────────────────────────────────
-export function parseCSV(text: string): Factura[] {
-  const result = Papa.parse(text, {
-    header: true,
-    skipEmptyLines: true,
-  }) as { data: Record<string, string>[] };
+export interface UltimaFactura {
+  fecha: string;        // "YYYY-MM-DD"
+  emisor: string;
+  rfcEmisor: string;
+  categoria: string;
+  total: number;
+  tipoFactura: string;  // "EMITIDA" | "RECIBIDA"
+}
 
-  return result.data
-    .filter((row: Record<string, string>) => row['uuid'] || row['UUID'])
-    .map((row: Record<string, string>): Factura => ({
-      uuid:          row['uuid']           ?? '',
-      fecha:         row['fecha']          ?? '',
-      fechaTimbrado: row['fecha-timbrado'] ?? '',
-      tipo:          row['tipo']           ?? '',
-      serie:         row['serie']          ?? '',
-      folio:         row['folio']          ?? '',
-      emisor:        (row['emisor']        ?? '').trim(),
-      rfcEmisor:     row['rfc-emisor']     ?? '',
-      receptor:      row['receptor']       ?? '',
-      rfcReceptor:   row['rfc-receptor']   ?? '',
-      usoCfdi:       row['uso-cfdi']       ?? '',
-      moneda:        row['moneda']         ?? '',
-      subtotal:      parseFloat(row['subtotal'] ?? '0') || 0,
-      total:         parseFloat(row['total']    ?? '0') || 0,
-      formaPago:     row['forma-pago']     ?? '',
-      metodoPago:    row['metodo-pago']    ?? '',
-      conceptos:     row['conceptos']      ?? '',
-      categoria:     (row['categoria']     ?? '').trim(),
-      tipoFactura:   (row['tipo de factura'] ?? '').trim().toUpperCase(),
-    }));
+export interface DashboardData {
+  totalRegistros: number;   // total de filas en public.facturas (sin filtrar)
+  kpis: KPIs;
+  monthly: MonthlySerie[];
+  categorias: CategoriaTotal[];
+  proveedores: ProveedorTotal[];
+  ultimas: UltimaFactura[];
+  mesesDisponibles: string[];
 }
 
 // ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
-/** Filas relevantes: excluye complementos de pago (tipo P y moneda XXX con total 0) */
-function facturasMonto(rows: Factura[]): Factura[] {
-  return rows.filter((r) => r.tipo !== 'P' && r.moneda !== 'XXX' && r.total > 0);
-}
-
 export const formatMXN = (n: number): string =>
   new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n);
 
-// ──────────────────────────────────────────────
-// Aggregations
-// ──────────────────────────────────────────────
-export function computeKPIs(rows: Factura[]): KPIs {
-  const valid = facturasMonto(rows);
+const num = (v: unknown): number => Number(v) || 0;
 
-  const emitidas  = valid.filter((r) => r.tipoFactura === 'EMITIDA');
-  const recibidas = valid.filter((r) => r.tipoFactura === 'RECIBIDA');
+// ──────────────────────────────────────────────
+// Fuente de datos: RPC server-side (una sola petición, payload ya agregado)
+// ──────────────────────────────────────────────
+/**
+ * Llama a public.dashboard_financiero(p_mes, p_tipo) y normaliza el JSON.
+ * Toda la agregación ocurre en Postgres; aquí solo mapeamos snake_case -> camelCase.
+ */
+export async function fetchDashboard(mes: string, tipo: string): Promise<DashboardData> {
+  const { data, error } = await supabase.rpc('dashboard_financiero', {
+    p_mes: mes,
+    p_tipo: tipo,
+  });
+  if (error) throw new Error(error.message);
 
-  const totalIngresos = emitidas.reduce((s, r) => s + r.total, 0);
-  const totalGastos   = recibidas.reduce((s, r) => s + r.total, 0);
-  const ivaTotal      = valid.reduce((s, r) => s + Math.max(0, r.total - r.subtotal), 0);
-  const numFacturas   = valid.length;
-  const ticketPromedio = numFacturas > 0 ? (totalIngresos + totalGastos) / numFacturas : 0;
+  const d = (data ?? {}) as any;
+  const k = d.kpis ?? {};
+
+  const totalIngresos = num(k.total_ingresos);
+  const totalGastos = num(k.total_gastos);
+  const numFacturas = num(k.num_facturas);
 
   return {
-    totalIngresos,
-    totalGastos,
-    balance: totalIngresos - totalGastos,
-    ivaTotal,
-    numFacturas,
-    ticketPromedio,
+    totalRegistros: num(d.total_registros),
+    kpis: {
+      totalIngresos,
+      totalGastos,
+      balance: totalIngresos - totalGastos,
+      ivaTotal: num(k.iva_total),
+      numFacturas,
+      ticketPromedio: numFacturas > 0 ? (totalIngresos + totalGastos) / numFacturas : 0,
+    },
+    monthly: (d.monthly ?? []).map((m: any): MonthlySerie => ({
+      month: m.month,
+      ingresos: num(m.ingresos),
+      gastos: num(m.gastos),
+    })),
+    categorias: (d.categorias ?? []).map((c: any): CategoriaTotal => ({
+      categoria: c.categoria,
+      total: num(c.total),
+    })),
+    proveedores: (d.proveedores ?? []).map((p: any): ProveedorTotal => ({
+      emisor: p.emisor,
+      total: num(p.total),
+    })),
+    ultimas: (d.ultimas ?? []).map((u: any): UltimaFactura => ({
+      fecha: u.fecha ?? '',
+      emisor: (u.emisor ?? '').trim(),
+      rfcEmisor: u.rfc_emisor ?? '',
+      categoria: (u.categoria ?? '').trim(),
+      total: num(u.total),
+      tipoFactura: (u.tipo_factura ?? '').trim().toUpperCase(),
+    })),
+    mesesDisponibles: d.meses_disponibles ?? [],
   };
-}
-
-export function monthlySeries(rows: Factura[]): MonthlySerie[] {
-  const valid = facturasMonto(rows);
-  const map: Record<string, { ingresos: number; gastos: number }> = {};
-
-  for (const r of valid) {
-    const month = r.fecha.slice(0, 7); // "YYYY-MM"
-    if (!map[month]) map[month] = { ingresos: 0, gastos: 0 };
-    if (r.tipoFactura === 'EMITIDA')   map[month].ingresos += r.total;
-    if (r.tipoFactura === 'RECIBIDA')  map[month].gastos   += r.total;
-  }
-
-  return Object.entries(map)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, v]) => ({ month, ...v }));
-}
-
-export function byCategoria(rows: Factura[], topN = 10): CategoriaTotal[] {
-  const valid = facturasMonto(rows).filter((r) => r.tipoFactura === 'RECIBIDA');
-  const map: Record<string, number> = {};
-
-  for (const r of valid) {
-    const cat = r.categoria || 'Sin categoría';
-    map[cat] = (map[cat] ?? 0) + r.total;
-  }
-
-  return Object.entries(map)
-    .map(([categoria, total]) => ({ categoria, total }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, topN);
-}
-
-export function topProveedores(rows: Factura[], topN = 8): ProveedorTotal[] {
-  const valid = facturasMonto(rows).filter((r) => r.tipoFactura === 'RECIBIDA');
-  const map: Record<string, number> = {};
-
-  for (const r of valid) {
-    const emisor = r.emisor || r.rfcEmisor || 'Desconocido';
-    map[emisor] = (map[emisor] ?? 0) + r.total;
-  }
-
-  return Object.entries(map)
-    .map(([emisor, total]) => ({ emisor, total }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, topN);
-}
-
-/** Extrae los meses únicos del dataset (YYYY-MM), ordenados */
-export function getMonths(rows: Factura[]): string[] {
-  const months = new Set(rows.map((r) => r.fecha.slice(0, 7)).filter(Boolean));
-  return Array.from(months).sort();
 }
