@@ -11,7 +11,8 @@ import {
   Users,
   Trophy,
   AlertTriangle,
-  Timer
+  Timer,
+  Loader2
 } from 'lucide-react';
 
 interface CollaboratorStats {
@@ -36,6 +37,7 @@ interface CollaboratorStats {
 export default function Collaborators() {
   const [stats, setStats] = useState<CollaboratorStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterProject, setFilterProject] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -49,6 +51,7 @@ export default function Collaborators() {
 
   const fetchData = async () => {
     setLoading(true);
+    setError(null);
     try {
       const fetchPromise = Promise.all([
         supabase.from('projects').select('id, name'),
@@ -59,13 +62,18 @@ export default function Collaborators() {
       ]);
 
       const timeoutPromise = new Promise<any>((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout al cargar datos de colaboradores")), 30000)
+        setTimeout(() => reject(new Error("La base de datos está tardando en responder (Timeout)")), 30000)
       );
 
       const [projRes, areasRes, profilesRes, tasksRes, checklistsRes] = await Promise.race([fetchPromise, timeoutPromise]);
 
-      if (projRes.data) setProjects(projRes.data);
+      if (projRes.error) throw projRes.error;
+      if (areasRes.error) throw areasRes.error;
+      if (profilesRes.error) throw profilesRes.error;
+      if (tasksRes.error) throw tasksRes.error;
+      if (checklistsRes.error) throw checklistsRes.error;
 
+      if (projRes.data) setProjects(projRes.data);
 
       if (!profilesRes.data || !tasksRes.data) return;
 
@@ -188,8 +196,9 @@ export default function Collaborators() {
       });
 
       setStats(finalStats);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error fetching stats:", err);
+      setError(err.message || "Error al cargar datos");
     } finally {
       setLoading(false);
     }
@@ -393,7 +402,25 @@ export default function Collaborators() {
 
       <div className="table-container" style={{ background: 'transparent', border: 'none' }}>
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px' }}><div className="loading-spinner"></div></div>
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
+              <Loader2 className="animate-spin" size={18} style={{ color: 'var(--primary-color)' }} />
+              <span>Cargando colaboradores...</span>
+            </div>
+          </div>
+        ) : error ? (
+          <div style={{ textAlign: 'center', padding: '48px', background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0' }}>
+            <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '12px' }}>
+              ⚠️ {error}
+            </div>
+            <button 
+              className="btn btn-secondary" 
+              onClick={() => fetchData()}
+              style={{ margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+            >
+              Reintentar
+            </button>
+          </div>
         ) : Object.keys(groupedStats).length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0' }}>No hay datos disponibles.</div>
         ) : Object.entries(groupedStats).map(([areaId, area]: any) => (

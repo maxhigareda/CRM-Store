@@ -30,6 +30,7 @@ export default function PlanTrabajo() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'my' | 'all'>('my');
 
@@ -39,6 +40,7 @@ export default function PlanTrabajo() {
 
   const fetchData = async () => {
     setLoading(true);
+    setError(null);
     try {
       // 1. Fetch projects and client data
       const fetchPromise = Promise.all([
@@ -48,13 +50,14 @@ export default function PlanTrabajo() {
       ]);
 
       const timeoutPromise = new Promise<[any, any, any]>((_, reject) => 
-        setTimeout(() => reject(new Error("Supabase timeout (Plan de Trabajo)")), 30000)
+        setTimeout(() => reject(new Error("La base de datos está tardando en responder (Timeout)")), 30000)
       );
 
       const [projRes, tasksRes, checklistsRes] = await Promise.race([fetchPromise, timeoutPromise]);
 
       if (projRes.error) throw projRes.error;
       if (tasksRes.error) throw tasksRes.error;
+      if (checklistsRes.error) throw checklistsRes.error;
 
       const allProjects = projRes.data || [];
       const allTasks = tasksRes.data || [];
@@ -113,6 +116,7 @@ export default function PlanTrabajo() {
       setProjects(projectsWithProgress);
     } catch (err: any) {
       console.error("Error en Plan de Trabajo:", err);
+      setError(err.message || 'Error al cargar el plan de trabajo');
       showNotification('error', 'Error al cargar el plan de trabajo: ' + err.message);
     } finally {
       setLoading(false);
@@ -208,7 +212,25 @@ export default function PlanTrabajo() {
             {loading ? (
               <tr>
                 <td colSpan={6} style={{ textAlign: 'center', padding: '60px' }}>
-                  <Loader2 className="animate-spin" style={{ margin: '0 auto', color: 'var(--primary-color)' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
+                    <Loader2 className="animate-spin" size={18} style={{ color: 'var(--primary-color)' }} />
+                    <span>Cargando plan de trabajo...</span>
+                  </div>
+                </td>
+              </tr>
+            ) : error ? (
+              <tr>
+                <td colSpan={6} style={{ textAlign: 'center', padding: '48px' }}>
+                  <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '12px' }}>
+                    ⚠️ {error}
+                  </div>
+                  <button 
+                    className="btn btn-secondary" 
+                    onClick={() => fetchData()}
+                    style={{ margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                  >
+                    Reintentar
+                  </button>
                 </td>
               </tr>
             ) : filteredProjects.length === 0 ? (
