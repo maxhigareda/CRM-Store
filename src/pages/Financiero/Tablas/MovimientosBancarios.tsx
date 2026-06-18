@@ -8,10 +8,10 @@ import { supabase } from '../../../lib/supabase';
 import { useNotification } from '../../../contexts/NotificationContext';
 
 // ──────────────────────────────────────────────
-// Definición de la tabla public.facturas
+// Definición de la tabla public.movimientos_bancarios
 // ──────────────────────────────────────────────
-type Factura = Record<string, any>;
-type FieldType = 'text' | 'number' | 'date' | 'textarea' | 'select';
+type Movimiento = Record<string, any>;
+type FieldType = 'text' | 'number' | 'date' | 'select';
 
 interface FieldDef {
   key: string;
@@ -22,40 +22,29 @@ interface FieldDef {
 }
 
 const FIELDS: FieldDef[] = [
-  { key: 'tipo_factura',   label: 'Tipo de factura',  type: 'select', options: ['EMITIDA', 'RECIBIDA'] },
-  { key: 'formato_origen', label: 'Formato origen',   type: 'select', options: ['XML', 'PDF'] },
-  { key: 'tipo',           label: 'Tipo CFDI',        type: 'text' },
-  { key: 'fecha',          label: 'Fecha',            type: 'date' },
-  { key: 'fecha_timbrado', label: 'Fecha timbrado',   type: 'date' },
-  { key: 'serie',          label: 'Serie',            type: 'text' },
-  { key: 'folio',          label: 'Folio',            type: 'text' },
-  { key: 'emisor',         label: 'Emisor',           type: 'text', span2: true },
-  { key: 'rfc_emisor',     label: 'RFC emisor',       type: 'text' },
-  { key: 'receptor',       label: 'Receptor',         type: 'text', span2: true },
-  { key: 'rfc_receptor',   label: 'RFC receptor',     type: 'text' },
-  { key: 'uso_cfdi',       label: 'Uso CFDI',         type: 'text' },
-  { key: 'moneda',         label: 'Moneda',           type: 'text' },
-  { key: 'subtotal',       label: 'Subtotal',         type: 'number' },
-  { key: 'total',          label: 'Total',            type: 'number' },
-  { key: 'forma_pago',     label: 'Forma de pago',    type: 'text' },
-  { key: 'metodo_pago',    label: 'Método de pago',   type: 'select', options: ['PUE', 'PPD'] },
-  { key: 'categoria',      label: 'Categoría',        type: 'text' },
-  { key: 'cfdi_uuid',      label: 'UUID CFDI',        type: 'text', span2: true },
-  { key: 'conceptos',      label: 'Conceptos',        type: 'textarea', span2: true },
+  { key: 'banco',           label: 'Banco',           type: 'text' },
+  { key: 'cuenta',          label: 'Cuenta',          type: 'text' },
+  { key: 'moneda',          label: 'Moneda',          type: 'select', options: ['MXN', 'USD'] },
+  { key: 'fecha',           label: 'Fecha',           type: 'date' },
+  { key: 'tipo_movimiento', label: 'Tipo movimiento', type: 'select', options: ['CARGO', 'ABONO'] },
+  { key: 'monto',           label: 'Monto',           type: 'number' },
+  { key: 'saldo',           label: 'Saldo',           type: 'number' },
+  { key: 'descripcion',     label: 'Descripción',     type: 'text', span2: true },
+  { key: 'referencia',      label: 'Referencia',      type: 'text', span2: true },
+  { key: 'archivo_origen',  label: 'Archivo origen',  type: 'text', span2: true },
 ];
 
-const SEARCH_COLUMNS = ['emisor', 'receptor', 'rfc_emisor', 'rfc_receptor', 'folio', 'serie', 'conceptos', 'categoria'];
+const SEARCH_COLUMNS = ['descripcion', 'referencia', 'banco', 'cuenta', 'archivo_origen'];
 
 const COLUMNS: { key: string; label: string; sortable: boolean; align?: 'right' | 'center' }[] = [
-  { key: 'fecha',        label: 'Fecha',     sortable: true },
-  { key: 'tipo_factura', label: 'Tipo',      sortable: true, align: 'center' },
-  { key: 'serie',        label: 'Serie',     sortable: true },
-  { key: 'folio',        label: 'Folio',     sortable: true },
-  { key: 'emisor',       label: 'Emisor',    sortable: true },
-  { key: 'receptor',     label: 'Receptor',  sortable: true },
-  { key: 'moneda',       label: 'Moneda',    sortable: true, align: 'center' },
-  { key: 'total',        label: 'Total',     sortable: true, align: 'right' },
-  { key: 'categoria',    label: 'Categoría', sortable: true },
+  { key: 'fecha',           label: 'Fecha',       sortable: true },
+  { key: 'tipo_movimiento', label: 'Tipo',         sortable: true, align: 'center' },
+  { key: 'banco',           label: 'Banco',        sortable: true },
+  { key: 'moneda',          label: 'Moneda',       sortable: true, align: 'center' },
+  { key: 'descripcion',     label: 'Descripción',  sortable: true },
+  { key: 'referencia',      label: 'Referencia',   sortable: true },
+  { key: 'monto',           label: 'Monto',        sortable: true, align: 'right' },
+  { key: 'saldo',           label: 'Saldo',        sortable: true, align: 'right' },
 ];
 
 const PAGE_SIZE = 25;
@@ -75,39 +64,40 @@ const fmtMoney = (v: any, moneda?: string) => {
   }).format(n);
 };
 
-const fmtCell = (col: string, row: Factura) => {
+const fmtCell = (col: string, row: Movimiento) => {
   const v = row[col];
   if (v === null || v === undefined || v === '') return '—';
-  if (col === 'total' || col === 'subtotal') return fmtMoney(v, row.moneda);
+  if (col === 'monto' || col === 'saldo') return fmtMoney(v, row.moneda);
   return String(v);
 };
 
 const sanitize = (s: string) => s.replace(/[(),%*]/g, '').trim();
 
-export default function FacturasTabla() {
+export default function MovimientosBancariosTabla() {
   const { showNotification } = useNotification();
 
   // ── Tabla ──────────────────────────────────
-  const [rows, setRows]     = useState<Factura[]>([]);
+  const [rows, setRows]     = useState<Movimiento[]>([]);
   const [total, setTotal]   = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const [page, setPage]               = useState(0);
-  const [sortColumn, setSortColumn]   = useState('fecha');
-  const [sortAsc, setSortAsc]         = useState(false);
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch]           = useState('');
-  const [tipoFilter, setTipoFilter]   = useState<'' | 'EMITIDA' | 'RECIBIDA'>('');
+  const [page, setPage]                 = useState(0);
+  const [sortColumn, setSortColumn]     = useState('fecha');
+  const [sortAsc, setSortAsc]           = useState(false);
+  const [searchInput, setSearchInput]   = useState('');
+  const [search, setSearch]             = useState('');
+  const [monedaFilter, setMonedaFilter] = useState<'' | 'MXN' | 'USD'>('');
+  const [tipoFilter, setTipoFilter]     = useState<'' | 'CARGO' | 'ABONO'>('');
 
-  const [editing, setEditing] = useState<Factura | null>(null);
-  const [form, setForm]       = useState<Factura>({});
+  const [editing, setEditing] = useState<Movimiento | null>(null);
+  const [form, setForm]       = useState<Movimiento>({});
   const [saving, setSaving]   = useState(false);
 
   // ── Upload ─────────────────────────────────
-  const [showUpload, setShowUpload]     = useState(false);
-  const [isDragging, setIsDragging]     = useState(false);
-  const [uploadFiles, setUploadFiles]   = useState<File[]>([]);
-  const [isUploading, setIsUploading]   = useState(false);
+  const [showUpload, setShowUpload]       = useState(false);
+  const [isDragging, setIsDragging]       = useState(false);
+  const [uploadFiles, setUploadFiles]     = useState<File[]>([]);
+  const [isUploading, setIsUploading]     = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -119,9 +109,10 @@ export default function FacturasTabla() {
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
-    let q = supabase.from('facturas').select('*', { count: 'exact' });
+    let q = supabase.from('movimientos_bancarios').select('*', { count: 'exact' });
 
-    if (tipoFilter) q = q.eq('tipo_factura', tipoFilter);
+    if (monedaFilter) q = q.eq('moneda', monedaFilter);
+    if (tipoFilter)   q = q.eq('tipo_movimiento', tipoFilter);
 
     const s = sanitize(search);
     if (s) {
@@ -134,13 +125,13 @@ export default function FacturasTabla() {
 
     const { data, count, error } = await q;
     if (error) {
-      showNotification('error', 'Error al cargar facturas: ' + error.message);
+      showNotification('error', 'Error al cargar movimientos: ' + error.message);
       setRows([]); setTotal(0);
     } else {
       setRows(data || []); setTotal(count || 0);
     }
     setLoading(false);
-  }, [page, sortColumn, sortAsc, search, tipoFilter, showNotification]);
+  }, [page, sortColumn, sortAsc, search, monedaFilter, tipoFilter, showNotification]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
@@ -150,7 +141,7 @@ export default function FacturasTabla() {
     setPage(0);
   };
 
-  const openEdit  = (row: Factura) => { setEditing(row); setForm({ ...row }); };
+  const openEdit  = (row: Movimiento) => { setEditing(row); setForm({ ...row }); };
   const closeEdit = () => { if (saving) return; setEditing(null); setForm({}); };
   const setField  = (key: string, value: any) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -159,7 +150,7 @@ export default function FacturasTabla() {
     if (!editing) return;
     setSaving(true);
 
-    const payload: Factura = {};
+    const payload: Movimiento = {};
     for (const f of FIELDS) {
       if (READONLY_KEYS.has(f.key)) continue;
       let v = form[f.key];
@@ -168,11 +159,11 @@ export default function FacturasTabla() {
       payload[f.key] = v;
     }
 
-    const { data, error } = await supabase.from('facturas').update(payload).eq('id', editing.id).select().single();
+    const { data, error } = await supabase.from('movimientos_bancarios').update(payload).eq('id', editing.id).select().single();
     setSaving(false);
 
     if (error) { showNotification('error', 'No se pudo guardar: ' + error.message); return; }
-    showNotification('success', 'Factura actualizada correctamente.');
+    showNotification('success', 'Movimiento actualizado correctamente.');
     setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...r, ...data } : r)));
     setEditing(null); setForm({});
   };
@@ -183,13 +174,13 @@ export default function FacturasTabla() {
     const valid: File[] = [];
     const invalid: string[] = [];
     Array.from(newFiles).forEach((file) => {
-      if (file.type === 'application/pdf' || file.type === 'text/xml' || file.name.endsWith('.xml') || file.name.endsWith('.pdf')) {
+      if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
         if (!uploadFiles.some((f) => f.name === file.name && f.size === file.size)) valid.push(file);
       } else {
         invalid.push(file.name);
       }
     });
-    if (invalid.length > 0) showNotification('error', `Archivos ignorados: ${invalid.join(', ')}. Solo .xml y .pdf`);
+    if (invalid.length > 0) showNotification('error', `Archivos ignorados: ${invalid.join(', ')}. Solo .txt`);
     if (valid.length > 0) { setUploadFiles((prev) => [...prev, ...valid]); setUploadSuccess(false); }
   };
 
@@ -202,19 +193,19 @@ export default function FacturasTabla() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleClassify = async () => {
+  const handleUpload = async () => {
     if (uploadFiles.length === 0) return;
     setIsUploading(true); setUploadSuccess(false);
     try {
       const formData = new FormData();
       uploadFiles.forEach((file) => formData.append('files', file));
-      const response = await fetch('https://n8n.myinfo.la/webhook/oraculo/clasificador-facturas', { method: 'POST', body: formData });
+      const response = await fetch('https://n8n.myinfo.la/webhook/oraculo/normalizador-edos-cuenta', { method: 'POST', body: formData });
       if (!response.ok) throw new Error(`Error del servidor: ${response.statusText}`);
-      showNotification('success', `${uploadFiles.length} archivo(s) enviado(s) para clasificación.`);
+      showNotification('success', `${uploadFiles.length} estado(s) de cuenta enviado(s) para procesamiento.`);
       setUploadFiles([]); setUploadSuccess(true);
       fetchRows();
     } catch (error: any) {
-      showNotification('error', 'Error al clasificar: ' + error.message);
+      showNotification('error', 'Error al procesar: ' + error.message);
     } finally {
       setIsUploading(false);
     }
@@ -233,9 +224,9 @@ export default function FacturasTabla() {
             <Database size={20} color="var(--primary-color)" />
           </div>
           <div>
-            <h1 className="page-title" style={{ margin: 0 }}>Facturas</h1>
+            <h1 className="page-title" style={{ margin: 0 }}>Movimientos Bancarios</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
-              Tabla directa <code>public.facturas</code> · {total.toLocaleString('es-MX')} registros
+              Tabla directa <code>public.movimientos_bancarios</code> · {total.toLocaleString('es-MX')} registros
             </p>
           </div>
         </div>
@@ -245,7 +236,7 @@ export default function FacturasTabla() {
           style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}
         >
           <UploadCloud size={16} />
-          Subir facturas
+          Subir estados de cuenta
           {showUpload ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
       </div>
@@ -269,7 +260,7 @@ export default function FacturasTabla() {
               marginBottom: uploadFiles.length > 0 || uploadSuccess ? '16px' : 0,
             }}
           >
-            <input type="file" multiple accept=".pdf,.xml,application/pdf,text/xml" ref={fileInputRef} onChange={handleFileInputChange} style={{ display: 'none' }} />
+            <input type="file" multiple accept=".txt,text/plain" ref={fileInputRef} onChange={handleFileInputChange} style={{ display: 'none' }} />
             {uploadSuccess ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
                 <CheckCircle2 size={24} color="#16a34a" />
@@ -280,7 +271,7 @@ export default function FacturasTabla() {
                 <UploadCloud size={24} color={isDragging ? 'var(--primary-color)' : '#94a3b8'} />
                 <div style={{ textAlign: 'left' }}>
                   <p style={{ margin: 0, fontWeight: 600, color: '#334155', fontSize: '0.95rem' }}>Haz clic o arrastra archivos aquí</p>
-                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>Solo .xml y .pdf</p>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>Solo .txt (estados de cuenta BBVA)</p>
                 </div>
               </div>
             )}
@@ -298,8 +289,8 @@ export default function FacturasTabla() {
                 {uploadFiles.map((file, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'white', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '8px 12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
-                      <div style={{ background: file.name.endsWith('.pdf') ? '#fee2e2' : '#fef9c3', padding: '6px', borderRadius: '6px', flexShrink: 0 }}>
-                        <File size={16} color={file.name.endsWith('.pdf') ? '#ef4444' : '#ca8a04'} />
+                      <div style={{ background: '#dbeafe', padding: '6px', borderRadius: '6px', flexShrink: 0 }}>
+                        <File size={16} color="#2563eb" />
                       </div>
                       <div style={{ overflow: 'hidden' }}>
                         <p style={{ margin: 0, fontWeight: 600, fontSize: '0.85rem', color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{file.name}</p>
@@ -313,8 +304,8 @@ export default function FacturasTabla() {
                 ))}
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button className="btn btn-primary" onClick={handleClassify} disabled={isUploading} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {isUploading ? <><Loader2 size={15} className="animate-spin" />Clasificando…</> : `Clasificar ${uploadFiles.length} archivo${uploadFiles.length !== 1 ? 's' : ''}`}
+                <button className="btn btn-primary" onClick={handleUpload} disabled={isUploading} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {isUploading ? <><Loader2 size={15} className="animate-spin" />Procesando…</> : `Procesar ${uploadFiles.length} archivo${uploadFiles.length !== 1 ? 's' : ''}`}
                 </button>
               </div>
             </>
@@ -329,7 +320,7 @@ export default function FacturasTabla() {
             <Search size={16} color="var(--text-muted)" style={{ marginRight: '8px', flexShrink: 0 }} />
             <input
               type="text"
-              placeholder="Buscar por emisor, receptor, RFC, folio, concepto…"
+              placeholder="Buscar por descripción, referencia, banco…"
               style={{ border: 'none', outline: 'none', width: '100%', fontSize: '0.875rem', background: 'transparent' }}
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -341,13 +332,22 @@ export default function FacturasTabla() {
             )}
           </div>
           <select
+            value={monedaFilter}
+            onChange={(e) => { setMonedaFilter(e.target.value as any); setPage(0); }}
+            style={{ background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 12px', fontSize: '0.875rem', color: 'var(--text-main)', outline: 'none', cursor: 'pointer', minWidth: '140px' }}
+          >
+            <option value="">Todas las monedas</option>
+            <option value="MXN">MXN</option>
+            <option value="USD">USD</option>
+          </select>
+          <select
             value={tipoFilter}
             onChange={(e) => { setTipoFilter(e.target.value as any); setPage(0); }}
-            style={{ background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 12px', fontSize: '0.875rem', color: 'var(--text-main)', outline: 'none', cursor: 'pointer', minWidth: '170px' }}
+            style={{ background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 12px', fontSize: '0.875rem', color: 'var(--text-main)', outline: 'none', cursor: 'pointer', minWidth: '140px' }}
           >
             <option value="">Todos los tipos</option>
-            <option value="EMITIDA">Emitidas</option>
-            <option value="RECIBIDA">Recibidas</option>
+            <option value="CARGO">Cargos</option>
+            <option value="ABONO">Abonos</option>
           </select>
         </div>
 
@@ -372,15 +372,19 @@ export default function FacturasTabla() {
             </thead>
             <tbody>
               {rows.length === 0 && !loading ? (
-                <tr><td colSpan={COLUMNS.length} style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>No se encontraron facturas.</td></tr>
+                <tr><td colSpan={COLUMNS.length} style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>No se encontraron movimientos.</td></tr>
               ) : (
                 rows.map((row) => (
                   <tr key={row.id} onClick={() => openEdit(row)} style={{ cursor: 'pointer' }} className="row-clickable">
                     {COLUMNS.map((col) => (
-                      <td key={col.key} style={{ textAlign: col.align || 'left', whiteSpace: col.key === 'emisor' || col.key === 'receptor' ? 'normal' : 'nowrap', maxWidth: col.key === 'emisor' || col.key === 'receptor' ? '220px' : undefined }}>
-                        {col.key === 'tipo_factura' ? (
-                          <span className="badge" style={{ background: row.tipo_factura === 'EMITIDA' ? '#dcfce7' : '#dbeafe', color: row.tipo_factura === 'EMITIDA' ? '#166534' : '#1e40af' }}>
-                            {row.tipo_factura}
+                      <td key={col.key} style={{ textAlign: col.align || 'left', whiteSpace: col.key === 'descripcion' || col.key === 'referencia' ? 'normal' : 'nowrap', maxWidth: col.key === 'descripcion' || col.key === 'referencia' ? '240px' : undefined }}>
+                        {col.key === 'tipo_movimiento' ? (
+                          <span className="badge" style={{ background: row.tipo_movimiento === 'CARGO' ? '#fee2e2' : '#dcfce7', color: row.tipo_movimiento === 'CARGO' ? '#991b1b' : '#166534' }}>
+                            {row.tipo_movimiento}
+                          </span>
+                        ) : col.key === 'moneda' ? (
+                          <span className="badge" style={{ background: row.moneda === 'USD' ? '#f3e8ff' : '#dbeafe', color: row.moneda === 'USD' ? '#6b21a8' : '#1e40af' }}>
+                            {row.moneda}
                           </span>
                         ) : fmtCell(col.key, row)}
                       </td>
@@ -409,7 +413,7 @@ export default function FacturasTabla() {
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '760px', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
             <div className="modal-header">
               <div>
-                <h3 className="modal-title" style={{ margin: 0 }}>Editar factura</h3>
+                <h3 className="modal-title" style={{ margin: 0 }}>Editar movimiento</h3>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>id: {editing.id}</span>
               </div>
               <button className="modal-close" onClick={closeEdit}><X size={20} /></button>
@@ -425,8 +429,6 @@ export default function FacturasTabla() {
                           <option value="">—</option>
                           {f.options!.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                         </select>
-                      ) : f.type === 'textarea' ? (
-                        <textarea className="form-input" rows={3} value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} style={{ resize: 'vertical' }} />
                       ) : (
                         <input className="form-input" type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'} step={f.type === 'number' ? '0.01' : undefined} value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} />
                       )}

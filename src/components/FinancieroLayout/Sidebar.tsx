@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  FileText,
   UserPlus,
   LogOut,
   ChevronLeft,
   Building2,
   LayoutDashboard,
-  Landmark,
   Table2,
+  Scale,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -43,20 +42,19 @@ export default function FinancieroSidebar() {
           <span>Dashboard</span>
         </NavLink>
 
-        <NavLink to="/financiero/facturas" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Facturas">
-          <FileText size={18} />
-          <span>Facturas</span>
-        </NavLink>
-
-        <NavLink to="/financiero/estados-cuenta" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Estados de Cuenta">
-          <Landmark size={18} />
-          <span>Estados de Cuenta</span>
+        <NavLink to="/financiero/conciliacion" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Conciliación">
+          <Scale size={18} />
+          <span>Conciliación</span>
         </NavLink>
 
         <div className="nav-section">BASE DE DATOS</div>
         <NavLink to="/financiero/tablas/facturas" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Tabla Facturas">
           <Table2 size={18} />
           <span>Facturas</span>
+        </NavLink>
+        <NavLink to="/financiero/tablas/movimientos" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Tabla Movimientos Bancarios">
+          <Table2 size={18} />
+          <span>Movimientos</span>
         </NavLink>
 
         <div className="nav-section">ADMINISTRACIÓN</div>
