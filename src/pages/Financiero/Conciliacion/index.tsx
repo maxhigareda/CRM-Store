@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search, X, Loader2, ChevronLeft, ChevronRight,
-  ArrowUp, ArrowDown, ArrowUpDown, Scale, Sparkles,
+  Scale, Sparkles,
   CheckCircle2, AlertCircle, Clock, Save, Trash2,
   Info, ArrowRight,
 } from 'lucide-react';
@@ -102,8 +102,8 @@ export default function Conciliacion() {
   const [total, setTotal]         = useState(0);
   const [loading, setLoading]     = useState(true);
   const [page, setPage]           = useState(0);
-  const [sortCol, setSortCol]     = useState('fecha');
-  const [sortAsc, setSortAsc]     = useState(false);
+  const [sortCol]     = useState('fecha');
+  const [sortAsc]     = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch]       = useState('');
 
@@ -191,12 +191,6 @@ export default function Conciliacion() {
         setFacturaSaldo((selected.total || 0) - monto);
       });
   }, [selected]);
-
-  const toggleSort = (col: string) => {
-    if (sortCol === col) setSortAsc(a => !a);
-    else { setSortCol(col); setSortAsc(true); }
-    setPage(0);
-  };
 
   // ── Fetch conciliaciones existentes de la factura ──
   const fetchConciliaciones = useCallback(async (facturaId: string) => {
