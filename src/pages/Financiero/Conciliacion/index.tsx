@@ -1,45 +1,26 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Search, X, Loader2, ChevronLeft, ChevronRight,
-  Scale, Sparkles,
-  CheckCircle2, AlertCircle, Clock, Save, Trash2,
-  Info, ArrowRight,
+  Scale, Clock, Trash2, ArrowRight,
+  Link2, CheckSquare, Square, Calendar, AlertTriangle, Eye,
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { useNotification } from '../../../contexts/NotificationContext';
 import { useAuth } from '../../../contexts/AuthContext';
+import { ComplementosCFDI, DatosCompletos } from '../components/FacturaDetalle';
 
 // ─────────────────────────────────────────────────────
-// Tipos
+// Conciliación bancaria MANUAL (sin IA).
+// Flujo: 1 factura emitida  ←→  N movimientos ABONO del estado de cuenta.
+// La relación se persiste en `public.conciliaciones` (tabla puente).
+// La contadora cruza a mano apoyándose en ordenante + fecha + monto.
 // ─────────────────────────────────────────────────────
 type FacturaRow = Record<string, any>;
-
-interface CandidatoRPC {
-  id: string;
-  fecha: string;
-  descripcion: string | null;
-  referencia: string | null;
-  monto: number;
-  moneda: string;
-  monto_conciliado: number;
-  saldo_disponible: number;
-  dif_monto: number;
-  dif_dias: number;
-}
-
-interface Sugerencia {
-  movimiento_id: string;
-  monto_aplicado: number;
-  porcentaje: number;
-  confianza: 'alta' | 'media' | 'baja';
-  razon: string;
-  _candidato?: CandidatoRPC;  // enriquecido en frontend
-  _fromHermes: boolean;
-}
+type MovRow      = Record<string, any>;
 
 interface ConciliacionExistente {
-  id: string;
-  movimiento_id: string;
+  id: number;
+  movimiento_id: number;
   monto_aplicado: number;
   moneda: string | null;
   metodo: string | null;
@@ -76,75 +57,92 @@ const fmtDate = (d: string | null) => {
 
 const sanitize = (s: string) => s.replace(/[(),%*]/g, '').trim();
 
-const estadoBadge = (conciliado: number, total: number) => {
-  if (conciliado <= 0) return { label: 'Pendiente', bg: '#fef9c3', color: '#854d0e' };
-  if (conciliado < total) return { label: 'Parcial', bg: '#fed7aa', color: '#9a3412' };
-  return { label: 'Conciliada', bg: '#dcfce7', color: '#166534' };
+const estadoBadge = (estado: string) => {
+  if (estado === 'conciliada') return { label: 'Conciliada', bg: '#dcfce7', color: '#166534' };
+  if (estado === 'parcial')    return { label: 'Parcial',    bg: '#fed7aa', color: '#9a3412' };
+  return { label: 'Pendiente', bg: '#fef9c3', color: '#854d0e' };
 };
 
-const confianzaBadge = (c: string) => {
-  if (c === 'alta')  return { bg: '#dcfce7', color: '#166534' };
-  if (c === 'media') return { bg: '#dbeafe', color: '#1e40af' };
-  return { bg: '#fee2e2', color: '#991b1b' };
+const PAGE_SIZE = 20;
+const FACTURA_SEARCH_COLUMNS = ['receptor', 'rfc_receptor', 'folio', 'serie'];
+const selectStyle: React.CSSProperties = {
+  background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px',
+  padding: '7px 10px', fontSize: '0.82rem', color: 'var(--text-main)', outline: 'none', cursor: 'pointer',
 };
-
-const WEBHOOK_URL = 'https://n8n.myinfo.la/webhook/oraculo/conciliador';
-const PAGE_SIZE   = 20;
-const SEARCH_COLUMNS = ['receptor', 'rfc_receptor', 'folio', 'serie', 'emisor'];
 
 // ─────────────────────────────────────────────────────
 export default function Conciliacion() {
   const { showNotification } = useNotification();
   const { user }             = useAuth();
 
-  // ── Panel izquierdo: lista de facturas EMITIDAS ────
-  const [rows, setRows]           = useState<FacturaRow[]>([]);
-  const [total, setTotal]         = useState(0);
-  const [loading, setLoading]     = useState(true);
-  const [page, setPage]           = useState(0);
-  const [sortCol]     = useState('fecha');
-  const [sortAsc]     = useState(false);
+  // ── Panel izquierdo: facturas EMITIDAS de ingreso ──
+  const [rows, setRows]       = useState<FacturaRow[]>([]);
+  const [total, setTotal]     = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage]       = useState(0);
   const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch]       = useState('');
+  const [search, setSearch]   = useState('');
+  const [estadoFilter, setEstadoFilter] = useState<'todas' | 'pendiente' | 'parcial' | 'conciliada'>('todas');
 
-  // mapa factura_id → monto conciliado (calculado en JS)
-  const [saldoMap, setSaldoMap]   = useState<Record<string, number>>({});
-  const [estadoFilter, setEstadoFilter] = useState<'todas' | 'pendientes' | 'parciales'>('todas');
-
-  // ── Panel derecho: workbench ───────────────────────
+  // ── Factura seleccionada ───────────────────────────
   const [selected, setSelected]   = useState<FacturaRow | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [sugerencias, setSugerencias] = useState<Sugerencia[]>([]);
-  const [candidatosFallback, setCandidatosFallback] = useState<CandidatoRPC[]>([]);
-  const [facturaSaldo, setFacturaSaldo] = useState(0);
+  const [concilSum, setConcilSum] = useState(0); // suma ya conciliada de la factura
   const [conciliaciones, setConciliaciones] = useState<ConciliacionExistente[]>([]);
-  const [loadingConcil, setLoadingConcil] = useState(false);
+  const [loadingConcil, setLoadingConcil]   = useState(false);
 
-  // ── Modal VoBo ─────────────────────────────────────
-  const [voboItem, setVoboItem]     = useState<Sugerencia | null>(null);
-  const [voboMonto, setVoboMonto]   = useState('');
-  const [voboNota, setVoboNota]     = useState('');
-  const [voboSaving, setVoboSaving] = useState(false);
+  // ── Selector de movimientos ABONO ──────────────────
+  const [movs, setMovs]           = useState<MovRow[]>([]);
+  const [loadingMovs, setLoadingMovs] = useState(false);
+  const [movSearchInput, setMovSearchInput] = useState('');
+  const [movSearch, setMovSearch] = useState('');
+  const [movDesde, setMovDesde]   = useState('');
+  const [movHasta, setMovHasta]   = useState('');
+  const [hideConciliados, setHideConciliados] = useState(true);
 
-  // ── Debounce búsqueda ──────────────────────────────
+  // Selección: movimiento_id → monto aplicado (string editable)
+  const [sel, setSel] = useState<Record<number, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  // ── Modal de detalle completo de la factura ────────
+  const [detailRow, setDetailRow]   = useState<FacturaRow | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const openDetail = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation(); // no seleccionar la factura al abrir el detalle
+    setDetailOpen(true); setDetailLoading(true); setDetailRow(null);
+    const { data, error } = await supabase.from('facturas').select('*').eq('id', id).single();
+    setDetailLoading(false);
+    if (error) { showNotification('error', 'No se pudo cargar el detalle: ' + error.message); return; }
+    setDetailRow(data);
+  };
+  const closeDetail = () => { setDetailOpen(false); setDetailRow(null); };
+
+  // ── Debounce búsquedas ─────────────────────────────
   useEffect(() => {
     const t = setTimeout(() => { setSearch(searchInput); setPage(0); }, 350);
     return () => clearTimeout(t);
   }, [searchInput]);
+  useEffect(() => {
+    const t = setTimeout(() => setMovSearch(movSearchInput), 350);
+    return () => clearTimeout(t);
+  }, [movSearchInput]);
 
-  // ── Fetch facturas EMITIDAS ────────────────────────
+  // ── Fetch facturas emitidas (vista con estado calculado) ──
   const fetchRows = useCallback(async () => {
     setLoading(true);
     try {
       let q = supabase
-        .from('facturas')
-        .select('id, fecha, folio, serie, receptor, rfc_receptor, moneda, total', { count: 'exact' })
+        .from('v_facturas_conciliacion')
+        .select('id, fecha, folio, serie, receptor, rfc_receptor, moneda, total, condiciones_pago, uso_cfdi, monto_conciliado, saldo_pendiente, estado_conciliacion', { count: 'exact' })
         .eq('tipo_factura', 'EMITIDA');
 
-      const s = sanitize(search);
-      if (s) q = q.or(SEARCH_COLUMNS.map(c => `${c}.ilike.%${s}%`).join(','));
+      if (estadoFilter !== 'todas') q = q.eq('estado_conciliacion', estadoFilter);
 
-      q = q.order(sortCol, { ascending: sortAsc, nullsFirst: false });
+      const s = sanitize(search);
+      if (s) q = q.or(FACTURA_SEARCH_COLUMNS.map(c => `${c}.ilike.%${s}%`).join(','));
+
+      q = q.order('fecha', { ascending: false, nullsFirst: false });
       q = q.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
       const { data, count, error } = await q;
@@ -152,48 +150,17 @@ export default function Conciliacion() {
         showNotification('error', 'Error al cargar facturas: ' + error.message);
         setRows([]); setTotal(0); return;
       }
-
-      const rows = data || [];
-      setRows(rows);
+      setRows(data || []);
       setTotal(count || 0);
-
-      if (rows.length > 0) {
-        const ids = rows.map(r => r.id);
-        const { data: concilData } = await supabase
-          .from('conciliaciones')
-          .select('factura_id, monto_aplicado')
-          .in('factura_id', ids);
-        const map: Record<string, number> = {};
-        (concilData || []).forEach(c => {
-          map[c.factura_id] = (map[c.factura_id] || 0) + Number(c.monto_aplicado);
-        });
-        setSaldoMap(map);
-      } else {
-        setSaldoMap({});
-      }
     } finally {
       setLoading(false);
     }
-  }, [page, sortCol, sortAsc, search, showNotification]);
+  }, [page, search, estadoFilter, showNotification]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
-  // Re-cargar saldos cuando cambian conciliaciones del item seleccionado
-  const refreshSaldoSelected = useCallback(() => {
-    if (!selected) return;
-    supabase
-      .from('conciliaciones')
-      .select('factura_id, monto_aplicado')
-      .eq('factura_id', selected.id)
-      .then(({ data }) => {
-        const monto = (data || []).reduce((s, c) => s + Number(c.monto_aplicado), 0);
-        setSaldoMap(prev => ({ ...prev, [selected.id]: monto }));
-        setFacturaSaldo((selected.total || 0) - monto);
-      });
-  }, [selected]);
-
-  // ── Fetch conciliaciones existentes de la factura ──
-  const fetchConciliaciones = useCallback(async (facturaId: string) => {
+  // ── Conciliaciones existentes de la factura ────────
+  const fetchConciliaciones = useCallback(async (facturaId: number) => {
     setLoadingConcil(true);
     try {
       const { data, error } = await supabase
@@ -201,193 +168,143 @@ export default function Conciliacion() {
         .select('*, movimientos_bancarios(fecha, descripcion, referencia, monto, moneda)')
         .eq('factura_id', facturaId)
         .order('created_at', { ascending: false });
-      if (!error) setConciliaciones((data as ConciliacionExistente[]) || []);
+      if (!error) {
+        const list = (data as ConciliacionExistente[]) || [];
+        setConciliaciones(list);
+        setConcilSum(list.reduce((s, c) => s + Number(c.monto_aplicado), 0));
+      }
     } finally {
       setLoadingConcil(false);
     }
   }, []);
 
+  // ── Movimientos ABONO candidatos (misma moneda que la factura) ──
+  const fetchMovs = useCallback(async (factura: FacturaRow) => {
+    setLoadingMovs(true);
+    try {
+      // Sin candado de moneda: el cliente puede pagar en la divisa que sea.
+      // La contadora ve TODOS los ABONOS y decide (cruce raw). `factura` se
+      // mantiene en la firma por si luego se quiere reactivar algún default.
+      void factura;
+      let q = supabase
+        .from('v_movimientos_bancarios')
+        .select('id, fecha, descripcion, referencia, monto, moneda, monto_conciliado, estado_conciliacion')
+        .eq('tipo_movimiento', 'ABONO');
+
+      if (hideConciliados) q = q.neq('estado_conciliacion', 'conciliada');
+      if (movDesde) q = q.gte('fecha', movDesde);
+      if (movHasta) q = q.lte('fecha', movHasta);
+      const s = sanitize(movSearch);
+      if (s) q = q.or(['descripcion', 'referencia'].map(c => `${c}.ilike.%${s}%`).join(','));
+
+      q = q.order('fecha', { ascending: false, nullsFirst: false }).limit(500);
+
+      const { data, error } = await q;
+      if (error) {
+        showNotification('error', 'Error al cargar movimientos: ' + error.message);
+        setMovs([]); return;
+      }
+      setMovs(data || []);
+    } finally {
+      setLoadingMovs(false);
+    }
+  }, [hideConciliados, movDesde, movHasta, movSearch, showNotification]);
+
+  // Re-cargar movimientos cuando cambian sus filtros (si hay factura activa)
+  useEffect(() => {
+    if (selected) fetchMovs(selected);
+  }, [selected, fetchMovs]);
+
   // ── Seleccionar factura ────────────────────────────
   const selectFactura = (row: FacturaRow) => {
     setSelected(row);
-    setSugerencias([]);
-    setCandidatosFallback([]);
-    const conciliado = saldoMap[row.id] || 0;
-    setFacturaSaldo((row.total || 0) - conciliado);
+    setSel({});
+    setConcilSum(row.monto_conciliado || 0);
     fetchConciliaciones(row.id);
   };
 
-  // ── Analizar con Hermes ────────────────────────────
-  const handleAnalizar = async () => {
-    if (!selected) return;
-    setAnalyzing(true);
-    setSugerencias([]);
-    setCandidatosFallback([]);
+  // saldo libre de un movimiento = monto − ya aplicado en otras conciliaciones
+  const saldoLibre = (m: MovRow) => Number(m.monto) - Number(m.monto_conciliado || 0);
 
-    try {
-      // 1. RPC determinista
-      const { data: rpcData, error: rpcError } = await supabase.rpc('candidatos_conciliacion', {
-        p_factura_id: selected.id,
-      });
-
-      if (rpcError) {
-        showNotification('error', 'Error al obtener candidatos: ' + rpcError.message);
-        return;
+  const toggleMov = (m: MovRow) => {
+    setSel(prev => {
+      const next = { ...prev };
+      if (m.id in next) {
+        delete next[m.id];
+      } else {
+        next[m.id] = String(saldoLibre(m).toFixed(2));
       }
-
-      const { factura_saldo, candidatos } = rpcData as {
-        factura: any;
-        factura_saldo: number;
-        candidatos: CandidatoRPC[];
-      };
-      setFacturaSaldo(factura_saldo);
-
-      if (!candidatos || candidatos.length === 0) {
-        showNotification('info', 'No se encontraron movimientos ABONO candidatos para esta factura.');
-        return;
-      }
-
-      // 2. Enviar a Hermes vía webhook (con fallback)
-      try {
-        const body = {
-          factura: {
-            id:           selected.id,
-            total:        selected.total,
-            moneda:       selected.moneda,
-            fecha:        selected.fecha,
-            folio:        selected.folio,
-            receptor:     selected.receptor,
-            rfc_receptor: selected.rfc_receptor,
-          },
-          factura_saldo,
-          candidatos,
-        };
-
-        const res = await fetch(WEBHOOK_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(20000),
-        });
-
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
-
-        const sugs: Sugerencia[] = (json.sugerencias || []).map((s: any) => ({
-          ...s,
-          _fromHermes: true,
-          _candidato: candidatos.find(c => c.id === s.movimiento_id),
-        }));
-
-        if (sugs.length === 0) {
-          showNotification('info', 'Hermes no encontró coincidencias. Mostrando candidatos por score.');
-          setCandidatosFallback(candidatos);
-        } else {
-          setSugerencias(sugs);
-        }
-      } catch {
-        showNotification('info', 'Hermes no disponible. Mostrando candidatos por score determinista.');
-        setCandidatosFallback(candidatos);
-      }
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  // ── Abrir modal VoBo ───────────────────────────────
-  const openVobo = (item: Sugerencia) => {
-    setVoboItem(item);
-    setVoboMonto(String(item.monto_aplicado));
-    setVoboNota(item._fromHermes ? item.razon : '');
-  };
-
-  const openVoboFromCandidato = (c: CandidatoRPC) => {
-    const sugerencia: Sugerencia = {
-      movimiento_id: c.id,
-      monto_aplicado: Math.min(c.saldo_disponible, facturaSaldo > 0 ? facturaSaldo : c.monto),
-      porcentaje: 100,
-      confianza: 'media',
-      razon: '',
-      _candidato: c,
-      _fromHermes: false,
-    };
-    openVobo(sugerencia);
-  };
-
-  // ── Confirmar VoBo ─────────────────────────────────
-  const handleConfirmVobo = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!voboItem || !selected) return;
-    setVoboSaving(true);
-
-    const monto = Number(voboMonto);
-    if (isNaN(monto) || monto <= 0) {
-      showNotification('error', 'El monto debe ser mayor a cero.');
-      setVoboSaving(false);
-      return;
-    }
-
-    const { error } = await supabase.from('conciliaciones').insert({
-      factura_id:     selected.id,
-      movimiento_id:  voboItem.movimiento_id,
-      monto_aplicado: monto,
-      moneda:         selected.moneda,
-      metodo:         voboItem._fromHermes ? 'auto' : 'manual',
-      conciliado_por: user?.id ?? null,
-      nota:           voboNota.trim() || null,
+      return next;
     });
+  };
+  const setMontoAplicado = (id: number, v: string) => setSel(prev => ({ ...prev, [id]: v }));
 
-    setVoboSaving(false);
+  const selIds   = Object.keys(sel).map(Number);
+  const selSum   = selIds.reduce((s, id) => s + (Number(sel[id]) || 0), 0);
+  const saldoFactura = selected ? Number(selected.total || 0) - concilSum : 0;
+  const difSeleccion = saldoFactura - selSum;
+
+  // ── Conciliar la selección ─────────────────────────
+  const handleConciliar = async () => {
+    if (!selected || selIds.length === 0) return;
+
+    // Validar montos. La moneda registrada es la del MOVIMIENTO (no la factura):
+    // el cliente puede pagar en otra divisa y se guarda tal cual (raw).
+    const movById = new Map(movs.map(m => [m.id, m]));
+    const payload = [];
+    for (const id of selIds) {
+      const monto = Number(sel[id]);
+      if (Number.isNaN(monto) || monto <= 0) {
+        showNotification('error', 'Todos los montos aplicados deben ser mayores a cero.');
+        return;
+      }
+      payload.push({
+        factura_id:     selected.id,
+        movimiento_id:  id,
+        monto_aplicado: monto,
+        moneda:         movById.get(id)?.moneda ?? selected.moneda,
+        metodo:         'manual',
+        conciliado_por: user?.id ?? null,
+      });
+    }
+
+    setSaving(true);
+    const { error } = await supabase
+      .from('conciliaciones')
+      .upsert(payload, { onConflict: 'factura_id,movimiento_id' });
+    setSaving(false);
 
     if (error) {
-      if (error.code === '23505') {
-        showNotification('error', 'Este movimiento ya está conciliado con esta factura.');
-      } else {
-        showNotification('error', 'Error al guardar: ' + error.message);
-      }
+      showNotification('error', 'Error al conciliar: ' + error.message);
       return;
     }
 
-    showNotification('success', 'VoBo confirmado. Conciliación registrada.');
-    setVoboItem(null);
-
-    // Refrescar conciliaciones + saldo
+    showNotification('success', `${payload.length} movimiento(s) conciliado(s) con la factura.`);
+    setSel({});
     await fetchConciliaciones(selected.id);
-    refreshSaldoSelected();
-
-    // Quitar la sugerencia aprobada
-    setSugerencias(prev => prev.filter(s => s.movimiento_id !== voboItem.movimiento_id));
-    setCandidatosFallback(prev => prev.filter(c => c.id !== voboItem.movimiento_id));
+    await fetchMovs(selected);
+    fetchRows();
   };
 
-  // ── Eliminar conciliación ──────────────────────────
-  const handleDelete = async (concilId: string) => {
+  // ── Eliminar una conciliación ──────────────────────
+  const handleDelete = async (concilId: number) => {
+    if (!selected) return;
     const { error } = await supabase.from('conciliaciones').delete().eq('id', concilId);
     if (error) { showNotification('error', 'No se pudo eliminar: ' + error.message); return; }
     showNotification('success', 'Conciliación eliminada.');
-    await fetchConciliaciones(selected!.id);
-    refreshSaldoSelected();
+    await fetchConciliaciones(selected.id);
+    await fetchMovs(selected);
+    fetchRows();
   };
-
-  // ── Filtro local de estado ─────────────────────────
-  const visibleRows = rows.filter(row => {
-    if (estadoFilter === 'todas') return true;
-    const c = saldoMap[row.id] || 0;
-    const t = row.total || 0;
-    if (estadoFilter === 'pendientes') return c <= 0;
-    if (estadoFilter === 'parciales')  return c > 0 && c < t;
-    return true;
-  });
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
   const rangeEnd   = Math.min((page + 1) * PAGE_SIZE, total);
+  const hasMovFilters = !!movSearch || !!movDesde || !!movHasta;
 
   // ─────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: '0' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
 
       {/* Header */}
       <div style={{ padding: '20px 24px 0', flexShrink: 0 }}>
@@ -398,7 +315,7 @@ export default function Conciliacion() {
           <div>
             <h1 className="page-title" style={{ margin: 0 }}>Conciliación Bancaria</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>
-              Facturas emitidas · Matching con movimientos ABONO · VoBo humano
+              Manual · Relaciona varios movimientos ABONO a una factura emitida
             </p>
           </div>
         </div>
@@ -407,8 +324,8 @@ export default function Conciliacion() {
       {/* Dos paneles */}
       <div style={{ display: 'flex', flex: 1, gap: '16px', padding: '0 24px 24px', overflow: 'hidden', minHeight: 0 }}>
 
-        {/* ── Panel izquierdo ── */}
-        <div style={{ width: '420px', flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* ── Panel izquierdo: facturas ── */}
+        <div style={{ width: '400px', flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <div className="table-container" style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
 
             {/* Toolbar */}
@@ -417,7 +334,7 @@ export default function Conciliacion() {
                 <Search size={14} color="var(--text-muted)" style={{ marginRight: '6px', flexShrink: 0 }} />
                 <input
                   type="text"
-                  placeholder="Receptor, folio, RFC…"
+                  placeholder="Cliente, folio, RFC…"
                   style={{ border: 'none', outline: 'none', width: '100%', fontSize: '0.82rem', background: 'transparent' }}
                   value={searchInput}
                   onChange={e => setSearchInput(e.target.value)}
@@ -428,14 +345,11 @@ export default function Conciliacion() {
                   </button>
                 )}
               </div>
-              <select
-                value={estadoFilter}
-                onChange={e => setEstadoFilter(e.target.value as any)}
-                style={{ background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '6px 8px', fontSize: '0.82rem', outline: 'none', cursor: 'pointer' }}
-              >
+              <select value={estadoFilter} onChange={e => { setEstadoFilter(e.target.value as any); setPage(0); }} style={selectStyle}>
                 <option value="todas">Todas</option>
-                <option value="pendientes">Pendientes</option>
-                <option value="parciales">Parciales</option>
+                <option value="pendiente">Pendientes</option>
+                <option value="parcial">Parciales</option>
+                <option value="conciliada">Conciliadas</option>
               </select>
             </div>
 
@@ -446,14 +360,13 @@ export default function Conciliacion() {
                   <Loader2 size={24} className="animate-spin" color="var(--primary-color)" />
                 </div>
               )}
-              {visibleRows.length === 0 && !loading ? (
+              {rows.length === 0 && !loading ? (
                 <div style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                   No se encontraron facturas.
                 </div>
               ) : (
-                visibleRows.map(row => {
-                  const conciliado = saldoMap[row.id] || 0;
-                  const badge = estadoBadge(conciliado, row.total || 0);
+                rows.map(row => {
+                  const badge = estadoBadge(row.estado_conciliacion);
                   const isActive = selected?.id === row.id;
                   return (
                     <div
@@ -465,7 +378,6 @@ export default function Conciliacion() {
                         cursor: 'pointer',
                         background: isActive ? '#eff6ff' : 'white',
                         borderLeft: isActive ? '3px solid var(--primary-color)' : '3px solid transparent',
-                        transition: 'background 0.15s',
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
@@ -479,11 +391,18 @@ export default function Conciliacion() {
                           </p>
                           <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)' }}>{row.rfc_receptor || ''}</p>
                         </div>
-                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                           <p style={{ margin: 0, fontWeight: 700, fontSize: '0.875rem', color: '#1e293b' }}>{fmtMoney(row.total, row.moneda)}</p>
-                          <span className="badge" style={{ background: badge.bg, color: badge.color, fontSize: '0.72rem', marginTop: '4px', display: 'inline-block' }}>
+                          <span className="badge" style={{ background: badge.bg, color: badge.color, fontSize: '0.72rem', display: 'inline-block' }}>
                             {badge.label}
                           </span>
+                          <button
+                            onClick={(e) => openDetail(e, row.id)}
+                            title="Ver detalle completo de la factura"
+                            style={{ background: 'none', border: '1px solid var(--border-color)', borderRadius: '6px', cursor: 'pointer', color: 'var(--text-muted)', padding: '3px 6px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.72rem' }}
+                          >
+                            <Eye size={13} /> Detalle
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -510,7 +429,7 @@ export default function Conciliacion() {
           </div>
         </div>
 
-        {/* ── Panel derecho ── */}
+        {/* ── Panel derecho: workbench ── */}
         <div style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
           {!selected ? (
             <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', gap: '12px' }}>
@@ -524,146 +443,178 @@ export default function Conciliacion() {
               <div className="table-container" style={{ padding: '16px 20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px', flexWrap: 'wrap' }}>
                   <div>
-                    <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Factura emitida</p>
+                    <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Factura emitida (cliente)</p>
                     <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#1e293b' }}>{selected.receptor || '—'}</h3>
                     <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
                       {selected.rfc_receptor || ''} · {fmtDate(selected.fecha)}
                       {selected.folio ? ` · Folio ${selected.folio}` : ''}
                     </p>
+                    {selected.condiciones_pago && (
+                      <p style={{ margin: '4px 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        Condiciones de pago: <strong>{selected.condiciones_pago}</strong>
+                      </p>
+                    )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)' }}>Total factura</p>
                     <p style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: '#1e293b' }}>{fmtMoney(selected.total, selected.moneda)}</p>
-                    <p style={{ margin: 0, fontSize: '0.82rem', color: facturaSaldo > 0 ? '#9a3412' : '#166534', fontWeight: 600 }}>
-                      Saldo pendiente: {fmtMoney(facturaSaldo, selected.moneda)}
+                    <p style={{ margin: 0, fontSize: '0.82rem', color: saldoFactura > 0.005 ? '#9a3412' : '#166534', fontWeight: 600 }}>
+                      Saldo pendiente: {fmtMoney(saldoFactura, selected.moneda)}
                     </p>
                   </div>
                 </div>
-
-                {/* Botón analizar */}
-                <div style={{ marginTop: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleAnalizar}
-                    disabled={analyzing || facturaSaldo <= 0}
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-                  >
-                    {analyzing ? <><Loader2 size={15} className="animate-spin" />Analizando…</> : <><Sparkles size={15} />Analizar con Hermes</>}
-                  </button>
-                  {facturaSaldo <= 0 && (
-                    <span style={{ fontSize: '0.82rem', color: '#166534', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <CheckCircle2 size={14} /> Totalmente conciliada
-                    </span>
-                  )}
-                </div>
               </div>
 
-              {/* Sugerencias de Hermes */}
-              {sugerencias.length > 0 && (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                    <Sparkles size={15} color="var(--primary-color)" />
-                    <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-main)' }}>Sugerencias de Hermes</span>
+              {/* Selector de movimientos ABONO */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                  <Link2 size={15} color="var(--primary-color)" />
+                  <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                    Movimientos ABONO — selecciona los que pagan esta factura
+                  </span>
+                </div>
+
+                {/* Filtros de movimientos */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '10px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '6px 10px', flex: '1 1 220px' }}>
+                    <Search size={14} color="var(--text-muted)" style={{ marginRight: '6px', flexShrink: 0 }} />
+                    <input
+                      type="text"
+                      placeholder="Ordenante, descripción, referencia…"
+                      style={{ border: 'none', outline: 'none', width: '100%', fontSize: '0.82rem', background: 'transparent' }}
+                      value={movSearchInput}
+                      onChange={e => setMovSearchInput(e.target.value)}
+                    />
+                    {movSearchInput && (
+                      <button onClick={() => setMovSearchInput('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0, display: 'flex' }}>
+                        <X size={14} />
+                      </button>
+                    )}
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {sugerencias.map(s => {
-                      const cb = confianzaBadge(s.confianza);
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <Calendar size={14} color="var(--text-muted)" />
+                    <input type="date" value={movDesde} onChange={e => setMovDesde(e.target.value)} style={selectStyle} title="Desde" />
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>–</span>
+                    <input type="date" value={movHasta} onChange={e => setMovHasta(e.target.value)} style={selectStyle} title="Hasta" />
+                  </div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}>
+                    <input type="checkbox" checked={hideConciliados} onChange={e => setHideConciliados(e.target.checked)} />
+                    Ocultar ya conciliados
+                  </label>
+                  {hasMovFilters && (
+                    <button onClick={() => { setMovSearchInput(''); setMovSearch(''); setMovDesde(''); setMovHasta(''); }} className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <X size={13} /> Limpiar
+                    </button>
+                  )}
+                </div>
+
+                {/* Lista de movimientos con checkbox */}
+                <div className="table-container" style={{ position: 'relative', maxHeight: '420px', overflowY: 'auto' }}>
+                  {loadingMovs && (
+                    <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2 }}>
+                      <Loader2 size={22} className="animate-spin" color="var(--primary-color)" />
+                    </div>
+                  )}
+                  {movs.length === 0 && !loadingMovs ? (
+                    <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                      No hay movimientos ABONO con estos filtros.
+                    </div>
+                  ) : (
+                    movs.map(m => {
+                      const checked = m.id in sel;
+                      const libre   = saldoLibre(m);
+                      const agotado = libre <= 0.005;
                       return (
-                        <div key={s.movimiento_id} className="table-container" style={{ padding: '14px 16px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', flexWrap: 'wrap' }}>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
-                                <span className="badge" style={{ background: cb.bg, color: cb.color, fontSize: '0.72rem' }}>
-                                  {s.confianza.toUpperCase()}
-                                </span>
-                                {s.porcentaje < 100 && (
-                                  <span className="badge" style={{ background: '#f3e8ff', color: '#6b21a8', fontSize: '0.72rem' }}>
-                                    {s.porcentaje}% del pago
-                                  </span>
-                                )}
+                        <div
+                          key={m.id}
+                          style={{
+                            display: 'flex', alignItems: 'flex-start', gap: '10px',
+                            padding: '10px 14px', borderBottom: '1px solid var(--border-color)',
+                            background: checked ? '#eff6ff' : 'white',
+                            opacity: agotado && !checked ? 0.5 : 1,
+                          }}
+                        >
+                          <button
+                            onClick={() => !agotado && toggleMov(m)}
+                            disabled={agotado && !checked}
+                            style={{ background: 'none', border: 'none', cursor: agotado && !checked ? 'not-allowed' : 'pointer', padding: 0, marginTop: '2px', color: checked ? 'var(--primary-color)' : 'var(--text-muted)', flexShrink: 0 }}
+                            title={agotado ? 'Movimiento totalmente aplicado' : 'Seleccionar'}
+                          >
+                            {checked ? <CheckSquare size={18} /> : <Square size={18} />}
+                          </button>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '2px' }}>
+                              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{fmtDate(m.fecha)}</span>
+                              <span style={{ fontWeight: 600, fontSize: '0.85rem', color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {m.descripcion || '—'}
+                              </span>
+                            </div>
+                            {m.referencia && (
+                              <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.referencia}>
+                                {m.referencia}
+                              </p>
+                            )}
+                            {checked && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+                                <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Aplicar:</span>
+                                <input
+                                  type="number" step="0.01" min="0.01"
+                                  value={sel[m.id]}
+                                  onChange={e => setMontoAplicado(m.id, e.target.value)}
+                                  style={{ ...selectStyle, width: '120px', cursor: 'text' }}
+                                  onClick={e => e.stopPropagation()}
+                                />
                               </div>
-                              {s._candidato && (
-                                <p style={{ margin: 0, fontSize: '0.85rem', color: '#1e293b', fontWeight: 600 }}>
-                                  {fmtDate(s._candidato.fecha)} · {s._candidato.descripcion || s._candidato.referencia || '—'}
-                                </p>
-                              )}
-                              <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '3px' }}>
-                                {s.razon}
+                            )}
+                          </div>
+                          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            <p style={{ margin: 0, fontWeight: 700, fontSize: '0.88rem', color: '#1e293b' }}>{fmtMoney(m.monto, m.moneda)}</p>
+                            {Number(m.monto_conciliado) > 0 && (
+                              <p style={{ margin: 0, fontSize: '0.72rem', color: agotado ? '#166534' : '#9a3412' }}>
+                                libre: {fmtMoney(libre, m.moneda)}
                               </p>
-                            </div>
-                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                              <p style={{ margin: 0, fontWeight: 700, fontSize: '0.95rem' }}>
-                                {fmtMoney(s.monto_aplicado, selected.moneda)}
-                              </p>
-                              {s._candidato && (
-                                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                  mov. total: {fmtMoney(s._candidato.monto, selected.moneda)}
-                                </p>
-                              )}
-                              <button
-                                className="btn btn-primary"
-                                onClick={() => openVobo(s)}
-                                style={{ marginTop: '8px', padding: '6px 12px', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px' }}
-                              >
-                                <CheckCircle2 size={14} /> VoBo
-                              </button>
-                            </div>
+                            )}
                           </div>
                         </div>
                       );
-                    })}
-                  </div>
+                    })
+                  )}
                 </div>
-              )}
 
-              {/* Candidatos fallback (sin Hermes) */}
-              {candidatosFallback.length > 0 && (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                    <Info size={15} color="var(--text-muted)" />
-                    <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text-main)' }}>Candidatos por score determinista</span>
+                {/* Barra de resumen + acción */}
+                {selIds.length > 0 && (
+                  <div className="table-container" style={{ marginTop: '10px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', borderColor: 'var(--primary-color)' }}>
+                    <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <div>
+                        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', display: 'block' }}>Seleccionados</span>
+                        <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{selIds.length} mov.</span>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', display: 'block' }}>Suma a aplicar</span>
+                        <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{fmtMoney(selSum, selected.moneda)}</span>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', display: 'block' }}>Saldo factura</span>
+                        <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{fmtMoney(saldoFactura, selected.moneda)}</span>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', display: 'block' }}>Diferencia</span>
+                        <span style={{ fontWeight: 700, fontSize: '0.9rem', color: Math.abs(difSeleccion) < 0.005 ? '#166534' : '#9a3412' }}>
+                          {fmtMoney(difSeleccion, selected.moneda)}
+                        </span>
+                      </div>
+                      {selSum > saldoFactura + 0.005 && (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.76rem', color: '#9a3412' }}>
+                          <AlertTriangle size={14} /> La suma excede el saldo
+                        </span>
+                      )}
+                    </div>
+                    <button className="btn btn-primary" onClick={handleConciliar} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {saving ? <><Loader2 size={15} className="animate-spin" />Guardando…</> : <><Link2 size={15} />Conciliar {selIds.length} mov.</>}
+                    </button>
                   </div>
-                  <div className="table-container" style={{ overflowX: 'auto' }}>
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th>Fecha</th>
-                          <th>Descripción</th>
-                          <th style={{ textAlign: 'right' }}>Monto</th>
-                          <th style={{ textAlign: 'right' }}>Saldo libre</th>
-                          <th style={{ textAlign: 'right' }}>Dif. $</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {candidatosFallback.map(c => (
-                          <tr key={c.id}>
-                            <td style={{ whiteSpace: 'nowrap', fontSize: '0.82rem' }}>{fmtDate(c.fecha)}</td>
-                            <td style={{ maxWidth: '200px', fontSize: '0.82rem' }}>
-                              <p style={{ margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.descripcion || '—'}</p>
-                              {c.referencia && <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.referencia}</p>}
-                            </td>
-                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 600, fontSize: '0.85rem' }}>{fmtMoney(c.monto, c.moneda)}</td>
-                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontSize: '0.85rem' }}>{fmtMoney(c.saldo_disponible, c.moneda)}</td>
-                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap', fontSize: '0.82rem', color: c.dif_monto < 1 ? '#166534' : 'var(--text-muted)' }}>
-                              {fmtMoney(c.dif_monto, c.moneda)}
-                            </td>
-                            <td>
-                              <button
-                                className="btn btn-secondary"
-                                onClick={() => openVoboFromCandidato(c)}
-                                style={{ padding: '4px 10px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}
-                              >
-                                <CheckCircle2 size={13} /> VoBo
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
 
               {/* Conciliaciones existentes */}
               <div>
@@ -687,21 +638,25 @@ export default function Conciliacion() {
                     <table className="table">
                       <thead>
                         <tr>
-                          <th>Movimiento</th>
+                          <th>Movimiento (ordenante)</th>
                           <th>Fecha mov.</th>
                           <th style={{ textAlign: 'right' }}>Monto aplicado</th>
                           <th style={{ textAlign: 'center' }}>Método</th>
-                          <th>Nota</th>
                           <th></th>
                         </tr>
                       </thead>
                       <tbody>
                         {conciliaciones.map(c => (
                           <tr key={c.id}>
-                            <td style={{ maxWidth: '180px', fontSize: '0.82rem' }}>
+                            <td style={{ maxWidth: '260px', fontSize: '0.82rem' }}>
                               <p style={{ margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {c.movimientos_bancarios?.descripcion || '—'}
                               </p>
+                              {c.movimientos_bancarios?.referencia && (
+                                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.movimientos_bancarios.referencia}>
+                                  {c.movimientos_bancarios.referencia}
+                                </p>
+                              )}
                             </td>
                             <td style={{ whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
                               {fmtDate(c.movimientos_bancarios?.fecha || null)}
@@ -710,13 +665,8 @@ export default function Conciliacion() {
                               {fmtMoney(c.monto_aplicado, c.moneda || selected.moneda)}
                             </td>
                             <td style={{ textAlign: 'center' }}>
-                              <span className="badge" style={{ background: c.metodo === 'auto' ? '#dbeafe' : '#f3f4f6', color: c.metodo === 'auto' ? '#1e40af' : '#374151', fontSize: '0.72rem' }}>
+                              <span className="badge" style={{ background: '#f3f4f6', color: '#374151', fontSize: '0.72rem' }}>
                                 {c.metodo || 'manual'}
-                              </span>
-                            </td>
-                            <td style={{ maxWidth: '160px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                              <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {c.nota || '—'}
                               </span>
                             </td>
                             <td>
@@ -740,79 +690,28 @@ export default function Conciliacion() {
         </div>
       </div>
 
-      {/* ── Modal VoBo ── */}
-      {voboItem && (
-        <div className="modal-overlay" onClick={() => !voboSaving && setVoboItem(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+      {/* ── Modal de detalle completo de la factura (read-only) ── */}
+      {detailOpen && (
+        <div className="modal-overlay" onClick={closeDetail}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '760px', maxHeight: '85vh', overflowY: 'auto' }}>
             <div className="modal-header">
-              <h3 className="modal-title" style={{ margin: 0 }}>Confirmar VoBo</h3>
-              <button className="modal-close" onClick={() => !voboSaving && setVoboItem(null)}><X size={20} /></button>
+              <h3 className="modal-title" style={{ margin: 0 }}>
+                Detalle de la factura{detailRow?.receptor ? ` · ${detailRow.receptor}` : ''}
+              </h3>
+              <button className="modal-close" onClick={closeDetail}><X size={20} /></button>
             </div>
-
-            <form onSubmit={handleConfirmVobo}>
-              <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-
-                {/* Info movimiento */}
-                {voboItem._candidato && (
-                  <div style={{ background: '#f8fafc', borderRadius: '10px', padding: '12px 14px' }}>
-                    <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Movimiento bancario</p>
-                    <p style={{ margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>{voboItem._candidato.descripcion || voboItem._candidato.referencia || '—'}</p>
-                    <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                      {fmtDate(voboItem._candidato.fecha)} · Total: {fmtMoney(voboItem._candidato.monto, voboItem._candidato.moneda)} · Saldo libre: {fmtMoney(voboItem._candidato.saldo_disponible, voboItem._candidato.moneda)}
-                    </p>
-                  </div>
-                )}
-
-                {/* Info factura */}
-                <div style={{ background: '#eff6ff', borderRadius: '10px', padding: '12px 14px' }}>
-                  <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Factura emitida</p>
-                  <p style={{ margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>{selected!.receptor}</p>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    Total: {fmtMoney(selected!.total, selected!.moneda)} · Saldo pendiente: {fmtMoney(facturaSaldo, selected!.moneda)}
-                  </p>
+            <div style={{ padding: '20px 24px' }}>
+              {detailLoading || !detailRow ? (
+                <div style={{ padding: '40px', display: 'flex', justifyContent: 'center' }}>
+                  <Loader2 size={24} className="animate-spin" color="var(--primary-color)" />
                 </div>
-
-                {/* Monto aplicado */}
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label>Monto aplicado ({selected!.moneda})</label>
-                  <input
-                    className="form-input"
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    required
-                    value={voboMonto}
-                    onChange={e => setVoboMonto(e.target.value)}
-                  />
-                </div>
-
-                {/* Nota */}
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label>Nota (opcional)</label>
-                  <input
-                    className="form-input"
-                    type="text"
-                    placeholder="Ej. Complemento de pago 25%, referencia SPEI…"
-                    value={voboNota}
-                    onChange={e => setVoboNota(e.target.value)}
-                  />
-                </div>
-
-                {voboItem._fromHermes && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f0fdf4', borderRadius: '8px', padding: '8px 12px' }}>
-                    <AlertCircle size={14} color="#166534" />
-                    <span style={{ fontSize: '0.78rem', color: '#166534' }}>Se registrará como <strong>auto</strong> (sugerido por Hermes).</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '16px 24px', borderTop: '1px solid var(--border-color)', background: '#fcfdfe' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setVoboItem(null)} disabled={voboSaving}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={voboSaving} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {voboSaving ? <><Loader2 size={15} className="animate-spin" />Guardando…</> : <><Save size={15} />Confirmar VoBo</>}
-                </button>
-              </div>
-            </form>
+              ) : (
+                <>
+                  <DatosCompletos factura={detailRow} title="Datos completos del comprobante" />
+                  <ComplementosCFDI factura={detailRow} />
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}

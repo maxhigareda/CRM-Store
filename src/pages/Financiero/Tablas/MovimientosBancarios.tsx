@@ -73,6 +73,11 @@ const fmtCell = (col: string, row: Movimiento) => {
 
 const sanitize = (s: string) => s.replace(/[(),%*]/g, '').trim();
 
+const selectStyle: React.CSSProperties = {
+  background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px',
+  padding: '8px 12px', fontSize: '0.875rem', color: 'var(--text-main)', outline: 'none', cursor: 'pointer',
+};
+
 export default function MovimientosBancariosTabla() {
   const { showNotification } = useNotification();
 
@@ -88,6 +93,16 @@ export default function MovimientosBancariosTabla() {
   const [search, setSearch]             = useState('');
   const [monedaFilter, setMonedaFilter] = useState<'' | 'MXN' | 'USD'>('');
   const [tipoFilter, setTipoFilter]     = useState<'' | 'CARGO' | 'ABONO'>('');
+  const [bancoFilter, setBancoFilter]   = useState('');
+  const [archivoFilter, setArchivoFilter] = useState('');
+  const [fechaDesde, setFechaDesde]     = useState('');
+  const [fechaHasta, setFechaHasta]     = useState('');
+  const [montoMin, setMontoMin]         = useState('');
+  const [montoMax, setMontoMax]         = useState('');
+
+  // Valores distintos para los dropdowns (se cargan una vez al montar)
+  const [bancos, setBancos]     = useState<string[]>([]);
+  const [archivos, setArchivos] = useState<string[]>([]);
 
   const [editing, setEditing] = useState<Movimiento | null>(null);
   const [form, setForm]       = useState<Movimiento>({});
@@ -107,12 +122,41 @@ export default function MovimientosBancariosTabla() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
+  // ── Cargar valores distintos para los dropdowns (una vez) ──
+  useEffect(() => {
+    (async () => {
+      const PAGE = 1000; // PostgREST topa en 1000 → paginamos hasta traer todo
+      const ban = new Set<string>(), arc = new Set<string>();
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('movimientos_bancarios')
+          .select('banco, archivo_origen')
+          .range(from, from + PAGE - 1);
+        if (error) break;
+        const batch = data ?? [];
+        batch.forEach((r: any) => {
+          if (r.banco)          ban.add(r.banco);
+          if (r.archivo_origen) arc.add(r.archivo_origen);
+        });
+        if (batch.length < PAGE) break;
+      }
+      setBancos([...ban].sort((a, b) => a.localeCompare(b, 'es')));
+      setArchivos([...arc].sort((a, b) => a.localeCompare(b, 'es')));
+    })();
+  }, []);
+
   const fetchRows = useCallback(async () => {
     setLoading(true);
     let q = supabase.from('movimientos_bancarios').select('*', { count: 'exact' });
 
-    if (monedaFilter) q = q.eq('moneda', monedaFilter);
-    if (tipoFilter)   q = q.eq('tipo_movimiento', tipoFilter);
+    if (monedaFilter)  q = q.eq('moneda', monedaFilter);
+    if (tipoFilter)    q = q.eq('tipo_movimiento', tipoFilter);
+    if (bancoFilter)   q = q.eq('banco', bancoFilter);
+    if (archivoFilter) q = q.eq('archivo_origen', archivoFilter);
+    if (fechaDesde)    q = q.gte('fecha', fechaDesde);
+    if (fechaHasta)    q = q.lte('fecha', fechaHasta);
+    if (montoMin !== '' && !Number.isNaN(Number(montoMin))) q = q.gte('monto', Number(montoMin));
+    if (montoMax !== '' && !Number.isNaN(Number(montoMax))) q = q.lte('monto', Number(montoMax));
 
     const s = sanitize(search);
     if (s) {
@@ -131,13 +175,24 @@ export default function MovimientosBancariosTabla() {
       setRows(data || []); setTotal(count || 0);
     }
     setLoading(false);
-  }, [page, sortColumn, sortAsc, search, monedaFilter, tipoFilter, showNotification]);
+  }, [page, sortColumn, sortAsc, search, monedaFilter, tipoFilter, bancoFilter, archivoFilter, fechaDesde, fechaHasta, montoMin, montoMax, showNotification]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
   const toggleSort = (col: string) => {
     if (sortColumn === col) setSortAsc((a) => !a);
     else { setSortColumn(col); setSortAsc(true); }
+    setPage(0);
+  };
+
+  const hasFilters =
+    !!search || !!monedaFilter || !!tipoFilter || !!bancoFilter || !!archivoFilter ||
+    !!fechaDesde || !!fechaHasta || montoMin !== '' || montoMax !== '';
+
+  const clearFilters = () => {
+    setSearchInput(''); setSearch('');
+    setMonedaFilter(''); setTipoFilter(''); setBancoFilter(''); setArchivoFilter('');
+    setFechaDesde(''); setFechaHasta(''); setMontoMin(''); setMontoMax('');
     setPage(0);
   };
 
@@ -202,11 +257,30 @@ export default function MovimientosBancariosTabla() {
     if (uploadFiles.length === 0) return;
     setIsUploading(true); setUploadSuccess(false);
     try {
-      const formData = new FormData();
-      uploadFiles.forEach((file) => formData.append('files', file));
-      const response = await fetch('https://n8n.myinfo.la/webhook-test/oraculo/normalizador-edos-cuenta', { method: 'POST', body: formData });
-      if (!response.ok) throw new Error(`Error del servidor: ${response.statusText}`);
-      showNotification('success', `${uploadFiles.length} estado(s) de cuenta enviado(s) para procesamiento.`);
+      const txts  = uploadFiles.filter((f) => f.name.toLowerCase().endsWith('.txt'));
+      const otros = uploadFiles.filter((f) => !f.name.toLowerCase().endsWith('.txt'));
+      const msgs: string[] = [];
+
+      // TXT BBVA → Edge Function procesar-edo-cuenta (parseo determinista en código,
+      // sin n8n). El export de BBVA es Latin-1: hay que decodificarlo como tal,
+      // no con f.text() (que asume UTF-8 y corrompe acentos como "Día").
+      if (txts.length > 0) {
+        const decoder = new TextDecoder('iso-8859-1');
+        const files = await Promise.all(
+          txts.map(async (f) => ({ name: f.name, text: decoder.decode(await f.arrayBuffer()) })),
+        );
+        const { data, error } = await supabase.functions.invoke('procesar-edo-cuenta', { body: { files } });
+        if (error) throw new Error(error.message);
+        const errCount = data?.errors?.length ?? 0;
+        msgs.push(`${data?.inserted ?? 0} movimiento(s) cargado(s)${errCount ? ` · ${errCount} archivo(s) con error` : ''}`);
+      }
+
+      // .xlsx aún no lo soporta el parser nuevo (los export BBVA que manejamos son .txt).
+      if (otros.length > 0) {
+        msgs.push(`${otros.length} archivo(s) no .txt ignorado(s) (formato no soportado aún)`);
+      }
+
+      showNotification('success', msgs.join(' · ') || 'Sin archivos procesables.');
       setUploadFiles([]); setUploadSuccess(true);
       fetchRows();
     } catch (error: any) {
@@ -276,7 +350,7 @@ export default function MovimientosBancariosTabla() {
                 <UploadCloud size={24} color={isDragging ? 'var(--primary-color)' : '#94a3b8'} />
                 <div style={{ textAlign: 'left' }}>
                   <p style={{ margin: 0, fontWeight: 600, color: '#334155', fontSize: '0.95rem' }}>Haz clic o arrastra archivos aquí</p>
-                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>Archivos .txt o .xlsx (estados de cuenta BBVA)</p>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>Archivos .txt (estados de cuenta BBVA MXN/USD)</p>
                 </div>
               </div>
             )}
@@ -339,7 +413,7 @@ export default function MovimientosBancariosTabla() {
           <select
             value={monedaFilter}
             onChange={(e) => { setMonedaFilter(e.target.value as any); setPage(0); }}
-            style={{ background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 12px', fontSize: '0.875rem', color: 'var(--text-main)', outline: 'none', cursor: 'pointer', minWidth: '140px' }}
+            style={{ ...selectStyle, minWidth: '140px' }}
           >
             <option value="">Todas las monedas</option>
             <option value="MXN">MXN</option>
@@ -348,12 +422,48 @@ export default function MovimientosBancariosTabla() {
           <select
             value={tipoFilter}
             onChange={(e) => { setTipoFilter(e.target.value as any); setPage(0); }}
-            style={{ background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 12px', fontSize: '0.875rem', color: 'var(--text-main)', outline: 'none', cursor: 'pointer', minWidth: '140px' }}
+            style={{ ...selectStyle, minWidth: '140px' }}
           >
             <option value="">Todos los tipos</option>
             <option value="CARGO">Cargos</option>
             <option value="ABONO">Abonos</option>
           </select>
+          {bancos.length > 1 && (
+            <select
+              value={bancoFilter}
+              onChange={(e) => { setBancoFilter(e.target.value); setPage(0); }}
+              style={{ ...selectStyle, minWidth: '140px' }}
+            >
+              <option value="">Todos los bancos</option>
+              {bancos.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
+          )}
+          <select
+            value={archivoFilter}
+            onChange={(e) => { setArchivoFilter(e.target.value); setPage(0); }}
+            style={{ ...selectStyle, flex: '1 1 200px', maxWidth: '260px' }}
+            title="Filtrar por estado de cuenta"
+          >
+            <option value="">Todos los archivos</option>
+            {archivos.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Fecha</span>
+            <input type="date" value={fechaDesde} onChange={(e) => { setFechaDesde(e.target.value); setPage(0); }} style={{ ...selectStyle, padding: '7px 10px' }} title="Desde" />
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>–</span>
+            <input type="date" value={fechaHasta} onChange={(e) => { setFechaHasta(e.target.value); setPage(0); }} style={{ ...selectStyle, padding: '7px 10px' }} title="Hasta" />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Monto</span>
+            <input type="number" inputMode="decimal" placeholder="mín" value={montoMin} onChange={(e) => { setMontoMin(e.target.value); setPage(0); }} style={{ ...selectStyle, padding: '7px 10px', width: '90px' }} title="Monto mínimo" />
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>–</span>
+            <input type="number" inputMode="decimal" placeholder="máx" value={montoMax} onChange={(e) => { setMontoMax(e.target.value); setPage(0); }} style={{ ...selectStyle, padding: '7px 10px', width: '90px' }} title="Monto máximo" />
+          </div>
+          {hasFilters && (
+            <button onClick={clearFilters} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', whiteSpace: 'nowrap' }}>
+              <X size={15} /> Limpiar filtros
+            </button>
+          )}
         </div>
 
         <div style={{ overflowX: 'auto', position: 'relative' }}>

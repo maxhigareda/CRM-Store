@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { useNotification } from '../../../contexts/NotificationContext';
+import { ComplementosCFDI, DatosCompletos } from '../components/FacturaDetalle';
 
 // ──────────────────────────────────────────────
 // Definición de la tabla public.facturas
@@ -98,177 +99,28 @@ const fmtCell = (col: string, row: Factura) => {
 
 const sanitize = (s: string) => s.replace(/[(),%*]/g, '').trim();
 
-// Los UUID (CFDI y documentos relacionados) siempre se muestran en mayúsculas.
-const upper = (v: any) => (v === null || v === undefined || v === '' ? v : String(v).toUpperCase());
+// Los componentes read-only del detalle (ComplementosCFDI, DatosCompletos) viven
+// en ../components/FacturaDetalle y se comparten con el modal de Conciliación.
 
 // ──────────────────────────────────────────────
-// Sección read-only "Datos completos (origen)": muestra TODA columna escalar
-// de la fila que no esté ya en el formulario editable ni en los complementos JSONB.
-// Es dinámica: columnas nuevas del XML aparecen solas, sin tocar código.
+// PDF extranjeros: n8n (Extract from File + Hermes) devuelve el array JSON; el
+// upsert se hace aquí (n8n ya NO inserta). Webhook configurable abajo.
 // ──────────────────────────────────────────────
-const RAW_LABELS: Record<string, string> = {
-  version:                     'Versión CFDI',
-  tipo_cambio:                 'Tipo de cambio',
-  regimen_fiscal_emisor:       'Régimen fiscal emisor',
-  regimen_fiscal_receptor:     'Régimen fiscal receptor',
-  domicilio_fiscal_receptor:   'Domicilio fiscal receptor',
-  descuento:                   'Descuento',
-  condiciones_pago:            'Condiciones de pago',
-  exportacion:                 'Exportación',
-  lugar_expedicion:            'Lugar de expedición',
-  total_impuestos_trasladados: 'Total impuestos trasladados',
-  total_impuestos_retenidos:   'Total impuestos retenidos',
-  archivo_origen:              'Archivo origen',
-  created_at:                  'Registrado en sistema',
-};
+const N8N_PDF_WEBHOOK = 'https://n8n.myinfo.la/webhook/oraculo/clasificador-facturas';
 
-const RAW_MONEY_KEYS = new Set(['descuento', 'total_impuestos_trasladados', 'total_impuestos_retenidos']);
-const JSONB_KEYS     = new Set(['impuestos', 'complemento_pago', 'nomina', 'cfdi_relacionados']);
-const RAW_SKIP_KEYS  = new Set(['id']); // ya va en el encabezado del modal
+// Solo se persisten columnas reales de `facturas` (whitelist): si n8n agrega
+// campos extra del clasificador (ej. categoria_id, confianza, nota) se ignoran y
+// no rompen el INSERT. `categoria` SÍ se persiste (= categoria_nombre del clasificador).
+const PDF_FACTURA_COLS = [
+  'cfdi_uuid', 'tipo_factura', 'tipo', 'formato_origen', 'fecha', 'fecha_timbrado',
+  'serie', 'folio', 'emisor', 'rfc_emisor', 'receptor', 'rfc_receptor', 'uso_cfdi',
+  'moneda', 'subtotal', 'total', 'forma_pago', 'metodo_pago', 'conceptos', 'categoria',
+];
 
-const humanize = (k: string) => k.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
-
-const fmtRaw = (key: string, value: any, moneda?: string) => {
-  if (value === null || value === undefined || value === '') return '—';
-  if (RAW_MONEY_KEYS.has(key)) return fmtMoney(value, moneda);
-  if (key === 'created_at') {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString('es-MX');
-  }
-  if (key === 'cfdi_uuid') return upper(value);
-  return String(value);
-};
-
-// ──────────────────────────────────────────────
-// Panel read-only: complementos del CFDI (impuestos, pago, nómina, relacionados)
-// Lee directamente las columnas JSONB de la fila.
-// ──────────────────────────────────────────────
-const secStyle: React.CSSProperties = { marginTop: 8, border: '1px solid var(--border-color)', borderRadius: 8, overflow: 'hidden' };
-const secHead: React.CSSProperties = { padding: '8px 12px', background: '#f8fafc', fontWeight: 700, fontSize: '0.8rem', color: 'var(--text-main)', borderBottom: '1px solid var(--border-color)' };
-const cell: React.CSSProperties = { padding: '6px 10px', fontSize: '0.78rem', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' };
-const th: React.CSSProperties = { ...cell, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', fontSize: '0.68rem', background: '#fcfdfe' };
-
-function MiniTable({ headers, rows }: { headers: string[]; rows: (string | number | null)[][] }) {
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr>{headers.map((h, i) => <th key={i} style={{ ...th, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i}>{r.map((c, j) => <td key={j} style={{ ...cell, textAlign: j === 0 ? 'left' : 'right' }}>{c ?? '—'}</td>)}</tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function ComplementosCFDI({ factura }: { factura: Factura }) {
-  const imp = factura.impuestos as any[] | null;
-  const cp = factura.complemento_pago as any | null;
-  const nom = factura.nomina as any | null;
-  const rel = factura.cfdi_relacionados as any[] | null;
-  if (!imp && !cp && !nom && !rel) return null;
-
-  return (
-    <div style={{ marginTop: 24 }}>
-      <h4 style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', margin: '0 0 4px' }}>Complementos del CFDI</h4>
-
-      {imp && imp.length > 0 && (
-        <div style={secStyle}>
-          <div style={secHead}>Impuestos</div>
-          <MiniTable
-            headers={['Tipo', 'Impuesto', 'Base', 'Tasa', 'Importe']}
-            rows={imp.map((t) => [
-              t.tipo, t.impuesto, fmtMoney(t.base, factura.moneda),
-              t.tasa_o_cuota != null ? `${(Number(t.tasa_o_cuota) * 100).toFixed(2)}%` : '—',
-              fmtMoney(t.importe, factura.moneda),
-            ])}
-          />
-        </div>
-      )}
-
-      {cp && Array.isArray(cp.pagos) && cp.pagos.map((p: any, idx: number) => (
-        <div key={idx} style={secStyle}>
-          <div style={secHead}>
-            Pago {cp.pagos.length > 1 ? `#${idx + 1}` : ''} · {p.fecha_pago?.slice(0, 10) ?? '—'} · {fmtMoney(p.monto, p.moneda_p)} {p.moneda_p}
-            {p.tipo_cambio_p && p.tipo_cambio_p !== 1 ? ` · TC ${p.tipo_cambio_p}` : ''}
-          </div>
-          {Array.isArray(p.docs_relacionados) && p.docs_relacionados.length > 0 && (
-            <MiniTable
-              headers={['Doc. relacionado (UUID)', 'Serie-Folio', 'Parc.', 'Saldo ant.', 'Pagado', 'Saldo insoluto']}
-              rows={p.docs_relacionados.map((d: any) => [
-                upper(d.id_documento), [d.serie, d.folio].filter(Boolean).join('-') || '—', d.num_parcialidad,
-                fmtMoney(d.imp_saldo_ant, d.moneda_dr), fmtMoney(d.imp_pagado, d.moneda_dr), fmtMoney(d.imp_saldo_insoluto, d.moneda_dr),
-              ])}
-            />
-          )}
-        </div>
-      ))}
-
-      {nom && (
-        <div style={secStyle}>
-          <div style={secHead}>
-            Nómina · {nom.empleado?.num_empleado ? `Emp. ${nom.empleado.num_empleado}` : ''} {nom.empleado?.puesto ?? ''}
-            {' · '}Percep. {fmtMoney(nom.total_percepciones)} · Deduc. {fmtMoney(nom.total_deducciones)}
-          </div>
-          <MiniTable
-            headers={['Percepción', 'Gravado', 'Exento']}
-            rows={(nom.percepciones ?? []).map((x: any) => [x.concepto, fmtMoney(x.importe_gravado), fmtMoney(x.importe_exento)])}
-          />
-          {(nom.deducciones ?? []).length > 0 && (
-            <MiniTable headers={['Deducción', 'Importe']} rows={(nom.deducciones ?? []).map((x: any) => [x.concepto, fmtMoney(x.importe)])} />
-          )}
-        </div>
-      )}
-
-      {rel && rel.length > 0 && (
-        <div style={secStyle}>
-          <div style={secHead}>CFDI relacionados</div>
-          <MiniTable
-            headers={['Tipo relación', 'UUIDs']}
-            rows={rel.map((g) => [g.tipo_relacion, (g.uuids ?? []).map(upper).join(', ')])}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DatosOrigen({ factura }: { factura: Factura }) {
-  const editableKeys = new Set(FIELDS.map((f) => f.key));
-  const entries = Object.entries(factura).filter(
-    ([k, v]) =>
-      !editableKeys.has(k) &&
-      !JSONB_KEYS.has(k) &&
-      !RAW_SKIP_KEYS.has(k) &&
-      typeof v !== 'object' &&        // los JSONB / arrays se muestran en ComplementosCFDI
-      v !== null && v !== undefined && v !== '',
-  );
-  if (entries.length === 0) return null;
-
-  return (
-    <div style={{ marginTop: 24 }}>
-      <h4 style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', margin: '0 0 4px' }}>
-        Datos completos del comprobante (origen)
-      </h4>
-      <div style={secStyle}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-          {entries.map(([k, v]) => (
-            <div key={k} style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9' }}>
-              <div style={{ fontSize: '0.68rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.02em' }}>
-                {RAW_LABELS[k] ?? humanize(k)}
-              </div>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-main)', wordBreak: 'break-word', marginTop: 2 }}>
-                {fmtRaw(k, v, factura.moneda)}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
+// Clave determinista para deduplicar PDFs (no traen cfdi_uuid). Incluye conceptos
+// para distinguir las filas de una nómina (mismo folio/emisor/fecha, distinta línea).
+const pdfDedupKey = (r: any) =>
+  ['PDF', r.emisor ?? '', r.folio ?? '', r.fecha ?? '', r.total ?? '', String(r.conceptos ?? '').slice(0, 80)].join('|');
 
 export default function FacturasTabla() {
   const { showNotification } = useNotification();
@@ -460,13 +312,37 @@ export default function FacturasTabla() {
         msgs.push(`${data?.inserted ?? 0} XML procesado(s)${errCount ? ` · ${errCount} con error` : ''}`);
       }
 
-      // PDF → sigue en n8n por ahora (migración a código pendiente).
+      // PDF → n8n (Extract from File + Hermes) devuelve el array de filas; el
+      // upsert se hace AQUÍ con la sesión del usuario (n8n ya no inserta).
       if (pdfs.length > 0) {
         const formData = new FormData();
         pdfs.forEach((file) => formData.append('files', file));
-        const response = await fetch('https://n8n.myinfo.la/webhook/oraculo/clasificador-facturas', { method: 'POST', body: formData });
+        const response = await fetch(N8N_PDF_WEBHOOK, { method: 'POST', body: formData });
         if (!response.ok) throw new Error(`Error del servidor (PDF): ${response.statusText}`);
-        msgs.push(`${pdfs.length} PDF enviado(s) a clasificación`);
+
+        // Defensivo: aceptar array directo o envuelto ({rows|data}), y string con
+        // fences de markdown (Hermes a veces los mete pese a la regla).
+        let payload: any = await response.json().catch(() => null);
+        if (typeof payload === 'string') {
+          payload = JSON.parse(payload.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, ''));
+        }
+        const rawRows: any[] = Array.isArray(payload) ? payload : (payload?.rows ?? payload?.data ?? []);
+
+        const errRows = rawRows.filter((r) => r && r.error);
+        const okRows  = rawRows.filter((r) => r && !r.error);
+
+        if (okRows.length > 0) {
+          const rows = okRows.map((r) => {
+            const row: Record<string, any> = {};
+            for (const c of PDF_FACTURA_COLS) if (c in r) row[c] = r[c];
+            row.formato_origen = 'PDF';
+            row.dedup_key = pdfDedupKey(r);
+            return row;
+          });
+          const { error } = await supabase.from('facturas').upsert(rows, { onConflict: 'dedup_key' });
+          if (error) throw new Error(`Upsert PDF: ${error.message}`);
+        }
+        msgs.push(`${okRows.length} fila(s) de PDF cargada(s)${errRows.length ? ` · ${errRows.length} con error de extracción` : ''}`);
       }
 
       showNotification('success', msgs.join(' · ') || 'Sin archivos procesables.');
@@ -735,7 +611,7 @@ export default function FacturasTabla() {
                     </div>
                   ))}
                 </div>
-                <DatosOrigen factura={editing} />
+                <DatosCompletos factura={editing} skipKeys={new Set(FIELDS.map((f) => f.key))} title="Datos completos del comprobante (origen)" />
                 <ComplementosCFDI factura={editing} />
               </div>
               <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '20px 32px', borderTop: '1px solid var(--border-color)', background: '#fcfdfe' }}>

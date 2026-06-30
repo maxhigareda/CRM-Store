@@ -1,0 +1,103 @@
+// Re-ingesta de estados de cuenta BBVA hacia `public.movimientos_bancarios`.
+// Reutiliza EXACTAMENTE el parser de la Edge Function
+// (supabase/functions/_shared/edocuenta.mjs). Inserta via service_role (omite
+// RLS). Idempotente: upsert por dedup_key.
+//
+// Uso:
+//   SUPABASE_SERVICE_ROLE_KEY=xxxx node scripts/reingest-edos.mjs [rutas...]
+// Por defecto procesa rsc/estados-cuenta.
+//
+// Importante: los export de BBVA son Latin-1 (no UTF-8). Se leen como "latin1".
+
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createClient } from "@supabase/supabase-js";
+import { parseEdoCuenta } from "../supabase/functions/_shared/edocuenta.mjs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(__dirname, "..");
+
+// ── credenciales ─────────────────────────────────────────
+function loadEnv() {
+  const env = { ...process.env };
+  try {
+    for (const line of readFileSync(join(ROOT, ".env"), "utf8").split("\n")) {
+      const m = line.match(/^\s*([\w.]+)\s*=\s*(.*)\s*$/);
+      if (m) env[m[1]] ??= m[2].replace(/^["']|["']$/g, "");
+    }
+  } catch { /* sin .env */ }
+  return env;
+}
+const env = loadEnv();
+const SUPABASE_URL = env.SUPABASE_URL || env.VITE_SUPABASE_URL;
+const SERVICE_KEY = env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!SUPABASE_URL || !SERVICE_KEY) {
+  console.error("Falta SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY (env).");
+  process.exit(1);
+}
+const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
+  auth: { persistSession: false },
+});
+
+// ── recorrer .txt ────────────────────────────────────────
+function walkTxt(dir, out = []) {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    const st = statSync(p);
+    if (st.isDirectory()) walkTxt(p, out);
+    else if (name.toLowerCase().endsWith(".txt")) out.push(p);
+  }
+  return out;
+}
+
+const targets = (process.argv.slice(2).length
+  ? process.argv.slice(2)
+  : ["rsc/estados-cuenta"]
+).map((t) => resolve(ROOT, t));
+
+const files = targets.flatMap((t) => {
+  try { return walkTxt(t); } catch { console.warn("No existe:", t); return []; }
+});
+console.log(`Encontrados ${files.length} TXT.`);
+
+// ── parsear ──────────────────────────────────────────────
+const rows = [];
+const parseErrors = [];
+for (const f of files) {
+  try {
+    const name = f.replace(ROOT + "/", "");
+    rows.push(...parseEdoCuenta(readFileSync(f, "latin1"), name));
+  } catch (e) {
+    parseErrors.push({ file: f, msg: e.message });
+  }
+}
+console.log(`Parseados ${rows.length} movimientos, errores de parseo ${parseErrors.length}.`);
+
+// Deduplicar por dedup_key (upsert con onConflict no acepta duplicados en el lote).
+const byKey = new Map();
+for (const r of rows) byKey.set(r.dedup_key, r);
+const unique = [...byKey.values()];
+console.log(`Unicos por dedup_key: ${unique.length} (duplicados en lote: ${rows.length - unique.length}).`);
+
+// ── upsert por lotes ─────────────────────────────────────
+const BATCH = 100;
+let inserted = 0;
+for (let i = 0; i < unique.length; i += BATCH) {
+  const batch = unique.slice(i, i + BATCH);
+  const { error } = await supabase
+    .from("movimientos_bancarios")
+    .upsert(batch, { onConflict: "dedup_key" });
+  if (error) {
+    console.error(`Lote ${i / BATCH} fallo:`, error.message);
+    process.exit(1);
+  }
+  inserted += batch.length;
+  process.stdout.write(`\rUpsert ${inserted}/${unique.length}`);
+}
+console.log(`\nListo. Upsert ${inserted} movimientos.`);
+if (parseErrors.length) {
+  console.log("Errores de parseo:");
+  for (const e of parseErrors.slice(0, 20)) console.log(" -", e.file, "→", e.msg);
+}
