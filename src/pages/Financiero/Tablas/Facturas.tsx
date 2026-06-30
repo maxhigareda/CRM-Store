@@ -61,6 +61,20 @@ const COLUMNS: { key: string; label: string; sortable: boolean; align?: 'right' 
 const PAGE_SIZE = 25;
 const READONLY_KEYS = new Set(['id', 'created_at']);
 
+// Tipos de comprobante CFDI (columna `tipo`)
+const TIPO_CFDI_OPTIONS: { value: string; label: string }[] = [
+  { value: 'I', label: 'I · Ingreso' },
+  { value: 'E', label: 'E · Egreso (nota de crédito)' },
+  { value: 'P', label: 'P · Pago (REP)' },
+  { value: 'N', label: 'N · Nómina' },
+  { value: 'T', label: 'T · Traslado' },
+];
+
+const selectStyle: React.CSSProperties = {
+  background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px',
+  padding: '8px 12px', fontSize: '0.875rem', color: 'var(--text-main)', outline: 'none', cursor: 'pointer',
+};
+
 // ──────────────────────────────────────────────
 // Helpers de formato
 // ──────────────────────────────────────────────
@@ -83,6 +97,47 @@ const fmtCell = (col: string, row: Factura) => {
 };
 
 const sanitize = (s: string) => s.replace(/[(),%*]/g, '').trim();
+
+// Los UUID (CFDI y documentos relacionados) siempre se muestran en mayúsculas.
+const upper = (v: any) => (v === null || v === undefined || v === '' ? v : String(v).toUpperCase());
+
+// ──────────────────────────────────────────────
+// Sección read-only "Datos completos (origen)": muestra TODA columna escalar
+// de la fila que no esté ya en el formulario editable ni en los complementos JSONB.
+// Es dinámica: columnas nuevas del XML aparecen solas, sin tocar código.
+// ──────────────────────────────────────────────
+const RAW_LABELS: Record<string, string> = {
+  version:                     'Versión CFDI',
+  tipo_cambio:                 'Tipo de cambio',
+  regimen_fiscal_emisor:       'Régimen fiscal emisor',
+  regimen_fiscal_receptor:     'Régimen fiscal receptor',
+  domicilio_fiscal_receptor:   'Domicilio fiscal receptor',
+  descuento:                   'Descuento',
+  condiciones_pago:            'Condiciones de pago',
+  exportacion:                 'Exportación',
+  lugar_expedicion:            'Lugar de expedición',
+  total_impuestos_trasladados: 'Total impuestos trasladados',
+  total_impuestos_retenidos:   'Total impuestos retenidos',
+  archivo_origen:              'Archivo origen',
+  created_at:                  'Registrado en sistema',
+};
+
+const RAW_MONEY_KEYS = new Set(['descuento', 'total_impuestos_trasladados', 'total_impuestos_retenidos']);
+const JSONB_KEYS     = new Set(['impuestos', 'complemento_pago', 'nomina', 'cfdi_relacionados']);
+const RAW_SKIP_KEYS  = new Set(['id']); // ya va en el encabezado del modal
+
+const humanize = (k: string) => k.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+
+const fmtRaw = (key: string, value: any, moneda?: string) => {
+  if (value === null || value === undefined || value === '') return '—';
+  if (RAW_MONEY_KEYS.has(key)) return fmtMoney(value, moneda);
+  if (key === 'created_at') {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString('es-MX');
+  }
+  if (key === 'cfdi_uuid') return upper(value);
+  return String(value);
+};
 
 // ──────────────────────────────────────────────
 // Panel read-only: complementos del CFDI (impuestos, pago, nómina, relacionados)
@@ -143,7 +198,7 @@ function ComplementosCFDI({ factura }: { factura: Factura }) {
             <MiniTable
               headers={['Doc. relacionado (UUID)', 'Serie-Folio', 'Parc.', 'Saldo ant.', 'Pagado', 'Saldo insoluto']}
               rows={p.docs_relacionados.map((d: any) => [
-                d.id_documento, [d.serie, d.folio].filter(Boolean).join('-') || '—', d.num_parcialidad,
+                upper(d.id_documento), [d.serie, d.folio].filter(Boolean).join('-') || '—', d.num_parcialidad,
                 fmtMoney(d.imp_saldo_ant, d.moneda_dr), fmtMoney(d.imp_pagado, d.moneda_dr), fmtMoney(d.imp_saldo_insoluto, d.moneda_dr),
               ])}
             />
@@ -172,10 +227,45 @@ function ComplementosCFDI({ factura }: { factura: Factura }) {
           <div style={secHead}>CFDI relacionados</div>
           <MiniTable
             headers={['Tipo relación', 'UUIDs']}
-            rows={rel.map((g) => [g.tipo_relacion, (g.uuids ?? []).join(', ')])}
+            rows={rel.map((g) => [g.tipo_relacion, (g.uuids ?? []).map(upper).join(', ')])}
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function DatosOrigen({ factura }: { factura: Factura }) {
+  const editableKeys = new Set(FIELDS.map((f) => f.key));
+  const entries = Object.entries(factura).filter(
+    ([k, v]) =>
+      !editableKeys.has(k) &&
+      !JSONB_KEYS.has(k) &&
+      !RAW_SKIP_KEYS.has(k) &&
+      typeof v !== 'object' &&        // los JSONB / arrays se muestran en ComplementosCFDI
+      v !== null && v !== undefined && v !== '',
+  );
+  if (entries.length === 0) return null;
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <h4 style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', margin: '0 0 4px' }}>
+        Datos completos del comprobante (origen)
+      </h4>
+      <div style={secStyle}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
+          {entries.map(([k, v]) => (
+            <div key={k} style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9' }}>
+              <div style={{ fontSize: '0.68rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.02em' }}>
+                {RAW_LABELS[k] ?? humanize(k)}
+              </div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-main)', wordBreak: 'break-word', marginTop: 2 }}>
+                {fmtRaw(k, v, factura.moneda)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -194,6 +284,17 @@ export default function FacturasTabla() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch]           = useState('');
   const [tipoFilter, setTipoFilter]   = useState<'' | 'EMITIDA' | 'RECIBIDA'>('');
+  const [tipoCfdiFilter, setTipoCfdiFilter] = useState('');
+  const [monedaFilter, setMonedaFilter]     = useState('');
+  const [emisorFilter, setEmisorFilter]     = useState('');
+  const [receptorFilter, setReceptorFilter] = useState('');
+  const [fechaDesde, setFechaDesde]         = useState('');
+  const [fechaHasta, setFechaHasta]         = useState('');
+
+  // Valores distintos para poblar los dropdowns (cargados una vez).
+  const [emisores, setEmisores]     = useState<string[]>([]);
+  const [receptores, setReceptores] = useState<string[]>([]);
+  const [monedas, setMonedas]       = useState<string[]>([]);
 
   const [editing, setEditing] = useState<Factura | null>(null);
   const [form, setForm]       = useState<Factura>({});
@@ -213,11 +314,42 @@ export default function FacturasTabla() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
+  // ── Cargar valores distintos para los dropdowns (una vez) ──
+  useEffect(() => {
+    (async () => {
+      const PAGE = 1000; // PostgREST topa en 1000 → paginamos hasta traer todo
+      const emi = new Set<string>(), rec = new Set<string>(), mon = new Set<string>();
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('facturas')
+          .select('emisor, receptor, moneda')
+          .range(from, from + PAGE - 1);
+        if (error) break;
+        const batch = data ?? [];
+        batch.forEach((r: any) => {
+          if (r.emisor)   emi.add(r.emisor);
+          if (r.receptor) rec.add(r.receptor);
+          if (r.moneda)   mon.add(r.moneda);
+        });
+        if (batch.length < PAGE) break;
+      }
+      setEmisores([...emi].sort((a, b) => a.localeCompare(b, 'es')));
+      setReceptores([...rec].sort((a, b) => a.localeCompare(b, 'es')));
+      setMonedas([...mon].sort());
+    })();
+  }, []);
+
   const fetchRows = useCallback(async () => {
     setLoading(true);
     let q = supabase.from('facturas').select('*', { count: 'exact' });
 
-    if (tipoFilter) q = q.eq('tipo_factura', tipoFilter);
+    if (tipoFilter)     q = q.eq('tipo_factura', tipoFilter);
+    if (tipoCfdiFilter) q = q.eq('tipo', tipoCfdiFilter);
+    if (monedaFilter)   q = q.eq('moneda', monedaFilter);
+    if (emisorFilter)   q = q.eq('emisor', emisorFilter);
+    if (receptorFilter) q = q.eq('receptor', receptorFilter);
+    if (fechaDesde)     q = q.gte('fecha', fechaDesde);
+    if (fechaHasta)     q = q.lte('fecha', fechaHasta);
 
     const s = sanitize(search);
     if (s) {
@@ -236,13 +368,24 @@ export default function FacturasTabla() {
       setRows(data || []); setTotal(count || 0);
     }
     setLoading(false);
-  }, [page, sortColumn, sortAsc, search, tipoFilter, showNotification]);
+  }, [page, sortColumn, sortAsc, search, tipoFilter, tipoCfdiFilter, monedaFilter, emisorFilter, receptorFilter, fechaDesde, fechaHasta, showNotification]);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
 
   const toggleSort = (col: string) => {
     if (sortColumn === col) setSortAsc((a) => !a);
     else { setSortColumn(col); setSortAsc(true); }
+    setPage(0);
+  };
+
+  const hasFilters =
+    !!search || !!tipoFilter || !!tipoCfdiFilter || !!monedaFilter ||
+    !!emisorFilter || !!receptorFilter || !!fechaDesde || !!fechaHasta;
+
+  const clearFilters = () => {
+    setSearchInput(''); setSearch('');
+    setTipoFilter(''); setTipoCfdiFilter(''); setMonedaFilter('');
+    setEmisorFilter(''); setReceptorFilter(''); setFechaDesde(''); setFechaHasta('');
     setPage(0);
   };
 
@@ -440,31 +583,61 @@ export default function FacturasTabla() {
 
       {/* Tabla */}
       <div className="table-container" style={{ position: 'relative' }}>
-        <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 12px', flex: '1 1 320px', maxWidth: '440px' }}>
-            <Search size={16} color="var(--text-muted)" style={{ marginRight: '8px', flexShrink: 0 }} />
-            <input
-              type="text"
-              placeholder="Buscar por emisor, receptor, RFC, folio, concepto…"
-              style={{ border: 'none', outline: 'none', width: '100%', fontSize: '0.875rem', background: 'transparent' }}
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-            />
-            {searchInput && (
-              <button onClick={() => setSearchInput('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0, marginLeft: '8px' }}>
-                <X size={16} />
+        <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {/* Fila 1: búsqueda + dropdowns principales */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 12px', flex: '1 1 280px', maxWidth: '440px' }}>
+              <Search size={16} color="var(--text-muted)" style={{ marginRight: '8px', flexShrink: 0 }} />
+              <input
+                type="text"
+                placeholder="Buscar por emisor, receptor, RFC, folio, concepto…"
+                style={{ border: 'none', outline: 'none', width: '100%', fontSize: '0.875rem', background: 'transparent' }}
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+              />
+              {searchInput && (
+                <button onClick={() => setSearchInput('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', flexShrink: 0, padding: 0, marginLeft: '8px' }}>
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            <select value={tipoFilter} onChange={(e) => { setTipoFilter(e.target.value as any); setPage(0); }} style={{ ...selectStyle, minWidth: '150px' }}>
+              <option value="">Emitidas y recibidas</option>
+              <option value="EMITIDA">Emitidas</option>
+              <option value="RECIBIDA">Recibidas</option>
+            </select>
+            <select value={tipoCfdiFilter} onChange={(e) => { setTipoCfdiFilter(e.target.value); setPage(0); }} style={{ ...selectStyle, minWidth: '160px' }}>
+              <option value="">Todos los CFDI</option>
+              {TIPO_CFDI_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <select value={monedaFilter} onChange={(e) => { setMonedaFilter(e.target.value); setPage(0); }} style={{ ...selectStyle, minWidth: '120px' }}>
+              <option value="">Toda moneda</option>
+              {monedas.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+
+          {/* Fila 2: emisor, receptor, rango de fecha, limpiar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <select value={emisorFilter} onChange={(e) => { setEmisorFilter(e.target.value); setPage(0); }} style={{ ...selectStyle, flex: '1 1 200px', maxWidth: '260px' }}>
+              <option value="">Todos los emisores</option>
+              {emisores.map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
+            <select value={receptorFilter} onChange={(e) => { setReceptorFilter(e.target.value); setPage(0); }} style={{ ...selectStyle, flex: '1 1 200px', maxWidth: '260px' }}>
+              <option value="">Todos los receptores</option>
+              {receptores.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Fecha</span>
+              <input type="date" value={fechaDesde} onChange={(e) => { setFechaDesde(e.target.value); setPage(0); }} style={{ ...selectStyle, padding: '7px 10px' }} title="Desde" />
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>–</span>
+              <input type="date" value={fechaHasta} onChange={(e) => { setFechaHasta(e.target.value); setPage(0); }} style={{ ...selectStyle, padding: '7px 10px' }} title="Hasta" />
+            </div>
+            {hasFilters && (
+              <button onClick={clearFilters} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', whiteSpace: 'nowrap' }}>
+                <X size={15} /> Limpiar filtros
               </button>
             )}
           </div>
-          <select
-            value={tipoFilter}
-            onChange={(e) => { setTipoFilter(e.target.value as any); setPage(0); }}
-            style={{ background: 'white', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '8px 12px', fontSize: '0.875rem', color: 'var(--text-main)', outline: 'none', cursor: 'pointer', minWidth: '170px' }}
-          >
-            <option value="">Todos los tipos</option>
-            <option value="EMITIDA">Emitidas</option>
-            <option value="RECIBIDA">Recibidas</option>
-          </select>
         </div>
 
         <div style={{ overflowX: 'auto', position: 'relative' }}>
@@ -557,11 +730,12 @@ export default function FacturasTabla() {
                       ) : f.type === 'textarea' ? (
                         <textarea className="form-input" rows={3} value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} style={{ resize: 'vertical' }} />
                       ) : (
-                        <input className="form-input" type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'} step={f.type === 'number' ? '0.01' : undefined} value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} />
+                        <input className="form-input" type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'} step={f.type === 'number' ? '0.01' : undefined} value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} style={f.key === 'cfdi_uuid' ? { textTransform: 'uppercase' } : undefined} />
                       )}
                     </div>
                   ))}
                 </div>
+                <DatosOrigen factura={editing} />
                 <ComplementosCFDI factura={editing} />
               </div>
               <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '20px 32px', borderTop: '1px solid var(--border-color)', background: '#fcfdfe' }}>
