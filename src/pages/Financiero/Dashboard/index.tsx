@@ -12,7 +12,10 @@ import {
   type TooltipItem,
 } from 'chart.js';
 import { Bar, Doughnut } from 'react-chartjs-2';
-import { Loader2, TrendingUp, TrendingDown, Scale, Receipt, Hash, Wallet, Users } from 'lucide-react';
+import {
+  Loader2, TrendingUp, TrendingDown, Scale, Receipt, Hash, Wallet, Users,
+  Coins, AlertTriangle, CalendarClock, CalendarDays, CalendarRange,
+} from 'lucide-react';
 import { useNotification } from '../../../contexts/NotificationContext';
 import {
   fetchDashboard,
@@ -141,7 +144,7 @@ export default function Dashboard() {
     );
   }
 
-  const { kpis, monthly, categorias, proveedores, ultimas: ultimasFacturas, mesesDisponibles: availableMonths, totalRegistros } = data;
+  const { kpis, monthly, categorias, proveedores, ultimas: ultimasFacturas, cxc, mesesDisponibles: availableMonths, totalRegistros } = data;
 
   // ── Datos de charts ──
   const monthlyChartData = {
@@ -191,6 +194,33 @@ export default function Dashboard() {
     }],
   };
 
+  // ── Datos de charts: Cuentas por cobrar ──
+  const cxcClienteData = {
+    labels: cxc.porCliente.map((c) => (c.cliente.length > 28 ? c.cliente.slice(0, 26) + '…' : c.cliente)),
+    datasets: [{
+      label: 'Saldo por cobrar',
+      data: cxc.porCliente.map((c) => c.saldo),
+      backgroundColor: '#f59e0bcc', borderColor: '#f59e0b', borderWidth: 1.5, borderRadius: 6,
+    }],
+  };
+  const cxcAgingData = {
+    labels: cxc.aging.map((a) => a.bucket),
+    datasets: [{
+      data: cxc.aging.map((a) => a.saldo),
+      backgroundColor: ['#16a34a', '#f59e0b', '#f97316', '#ef4444'],
+      borderWidth: 2, borderColor: '#ffffff',
+    }],
+  };
+  const cxcCobranzaData = {
+    labels: cxc.cobranza.map((c) => c.bucket),
+    datasets: [{
+      label: 'Por cobrar',
+      data: cxc.cobranza.map((c) => c.saldo),
+      backgroundColor: ['#ef4444cc', '#0070f3cc', '#06b6d4cc', '#8b5cf6cc', '#94a3b8cc'],
+      borderWidth: 1.5, borderRadius: 6,
+    }],
+  };
+
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -214,6 +244,12 @@ export default function Dashboard() {
         },
       },
     },
+  };
+
+  // Barra vertical de una sola serie (colores por barra) → sin leyenda.
+  const verticalBarSingleOptions = {
+    ...chartOptions,
+    plugins: { ...chartOptions.plugins, legend: { display: false } },
   };
 
   const doughnutOptions = {
@@ -380,6 +416,155 @@ export default function Dashboard() {
           bgColor="#fef3c7"
           sub="Por factura"
         />
+      </div>
+
+      {/* ───────── Cuentas por Cobrar ───────── */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Coins size={20} style={{ color: '#f59e0b' }} /> Cuentas por cobrar
+        </h2>
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+          ¿Quién nos debe y cuánto entra? · snapshot actual (no depende del filtro de mes)
+        </span>
+      </div>
+
+      {/* KPIs de cobranza */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 24 }}>
+        <KpiCard
+          label="Por cobrar (total)"
+          value={formatMXN(cxc.totalPorCobrar)}
+          icon={<Coins size={18} />}
+          color="#f59e0b" bgColor="#fef3c7"
+          sub={`${cxc.numFacturasPendientes} facturas · ${cxc.numClientesDeudores} clientes`}
+        />
+        <KpiCard
+          label="Vencido"
+          value={formatMXN(cxc.vencido)}
+          icon={<AlertTriangle size={18} />}
+          color={COLOR_GASTOS} bgColor="#fee2e2"
+          sub="Ya nos lo debían"
+        />
+        <KpiCard
+          label="Vence hoy"
+          value={formatMXN(cxc.hoy)}
+          icon={<CalendarClock size={18} />}
+          color={COLOR_PRIMARY} bgColor="#dbeafe"
+          sub="HOY nos deberían pagar"
+        />
+        <KpiCard
+          label="De aquí al 15"
+          value={formatMXN(cxc.hastaDia15)}
+          icon={<CalendarDays size={18} />}
+          color="#8b5cf6" bgColor="#f3e8ff"
+          sub="Vence antes del próximo 15"
+        />
+        <KpiCard
+          label="Este mes"
+          value={formatMXN(cxc.esteMes)}
+          icon={<CalendarRange size={18} />}
+          color={COLOR_INGRESOS} bgColor="#dcfce7"
+          sub="Vence de hoy a fin de mes"
+        />
+      </div>
+
+      {/* Gráficas de cobranza */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 20, marginBottom: 20 }}>
+        <ChartCard title="Quién nos debe — top clientes">
+          <div style={{ height: Math.max(240, cxc.porCliente.length * 38) }}>
+            {cxc.porCliente.length > 0
+              ? <Bar data={cxcClienteData} options={horizontalBarOptions} />
+              : <p style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 80 }}>Nadie nos debe 🎉</p>
+            }
+          </div>
+        </ChartCard>
+
+        <ChartCard title="Antigüedad de saldos (desde emisión)">
+          <div style={{ height: 280 }}>
+            {cxc.totalPorCobrar > 0
+              ? <Doughnut data={cxcAgingData} options={doughnutOptions} />
+              : <p style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 80 }}>Sin saldos pendientes</p>
+            }
+          </div>
+        </ChartCard>
+      </div>
+
+      <div style={{ marginBottom: 20 }}>
+        <ChartCard title="Cobranza esperada por vencimiento (estimado según condiciones de pago)">
+          <div style={{ height: 280 }}>
+            {cxc.totalPorCobrar > 0
+              ? <Bar data={cxcCobranzaData} options={verticalBarSingleOptions} />
+              : <p style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 80 }}>Sin saldos pendientes</p>
+            }
+          </div>
+        </ChartCard>
+      </div>
+
+      {/* Tabla: facturas por cobrar */}
+      <div style={{
+        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+        borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden', marginBottom: 32,
+      }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', margin: 0 }}>
+            Facturas por cobrar — más vencidas primero
+          </h3>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc' }}>
+                {['Cliente', 'Emisión', 'Vence', 'Estatus', 'Saldo'].map((h) => (
+                  <th key={h} style={{
+                    padding: '10px 16px', textAlign: h === 'Saldo' ? 'right' : 'left', fontWeight: 700,
+                    color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase',
+                    letterSpacing: '0.05em', borderBottom: '1px solid var(--border-color)',
+                  }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {cxc.facturas.length === 0 ? (
+                <tr><td colSpan={5} style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>Sin facturas pendientes de cobro 🎉</td></tr>
+              ) : cxc.facturas.map((f, i) => {
+                const vencida = f.diasVencido > 0;
+                const estatus = f.diasVencido > 0 ? `Vencida ${f.diasVencido}d`
+                  : f.diasVencido === 0 ? 'Vence hoy'
+                  : `En ${Math.abs(f.diasVencido)}d`;
+                return (
+                  <tr key={i}
+                    style={{ borderBottom: '1px solid #f1f5f9' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <td style={{ padding: '10px 16px', color: 'var(--text-main)', fontWeight: 500, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {f.cliente}
+                    </td>
+                    <td style={{ padding: '10px 16px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{f.fecha}</td>
+                    <td style={{ padding: '10px 16px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{f.vencimiento}</td>
+                    <td style={{ padding: '10px 16px' }}>
+                      <span style={{
+                        display: 'inline-block', padding: '2px 10px', borderRadius: 999, fontSize: '0.75rem', fontWeight: 700,
+                        background: vencida ? '#fee2e2' : f.diasVencido === 0 ? '#dbeafe' : '#f1f5f9',
+                        color: vencida ? '#991b1b' : f.diasVencido === 0 ? '#1e40af' : '#475569',
+                      }}>
+                        {estatus}
+                      </span>
+                      {f.estado === 'parcial' && (
+                        <span style={{ marginLeft: 6, fontSize: '0.7rem', color: '#9a3412' }}>parcial</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '10px 16px', fontWeight: 700, color: 'var(--text-main)', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                      {formatMXN(f.saldo)}
+                      {f.moneda !== 'MXN' && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 4 }}>({f.moneda})</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Gráficas — fila 1 */}
