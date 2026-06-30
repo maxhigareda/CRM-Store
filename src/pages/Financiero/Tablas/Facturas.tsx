@@ -492,15 +492,28 @@ export default function FacturasTabla() {
               ) : (
                 rows.map((row) => (
                   <tr key={row.id} onClick={() => openEdit(row)} style={{ cursor: 'pointer' }} className="row-clickable">
-                    {COLUMNS.map((col) => (
-                      <td key={col.key} style={{ textAlign: col.align || 'left', whiteSpace: col.key === 'emisor' || col.key === 'receptor' ? 'normal' : 'nowrap', maxWidth: col.key === 'emisor' || col.key === 'receptor' ? '220px' : undefined }}>
+                    {COLUMNS.map((col) => {
+                      const truncate = col.key === 'emisor' || col.key === 'receptor';
+                      return (
+                      <td
+                        key={col.key}
+                        title={truncate ? String(row[col.key] ?? '') : undefined}
+                        style={{
+                          textAlign: col.align || 'left',
+                          whiteSpace: 'nowrap',
+                          maxWidth: truncate ? '220px' : undefined,
+                          overflow: truncate ? 'hidden' : undefined,
+                          textOverflow: truncate ? 'ellipsis' : undefined,
+                        }}
+                      >
                         {col.key === 'tipo_factura' ? (
                           <span className="badge" style={{ background: row.tipo_factura === 'EMITIDA' ? '#dcfce7' : '#dbeafe', color: row.tipo_factura === 'EMITIDA' ? '#166534' : '#1e40af' }}>
                             {row.tipo_factura}
                           </span>
                         ) : fmtCell(col.key, row)}
                       </td>
-                    ))}
+                      );
+                    })}
                   </tr>
                 ))
               )}
