@@ -174,13 +174,18 @@ export default function MovimientosBancariosTabla() {
     const valid: File[] = [];
     const invalid: string[] = [];
     Array.from(newFiles).forEach((file) => {
-      if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+      if (
+        file.type === 'text/plain' ||
+        file.name.endsWith('.txt') ||
+        file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        file.name.endsWith('.xlsx')
+      ) {
         if (!uploadFiles.some((f) => f.name === file.name && f.size === file.size)) valid.push(file);
       } else {
         invalid.push(file.name);
       }
     });
-    if (invalid.length > 0) showNotification('error', `Archivos ignorados: ${invalid.join(', ')}. Solo .txt`);
+    if (invalid.length > 0) showNotification('error', `Archivos ignorados: ${invalid.join(', ')}. Solo .txt o .xlsx`);
     if (valid.length > 0) { setUploadFiles((prev) => [...prev, ...valid]); setUploadSuccess(false); }
   };
 
@@ -199,7 +204,7 @@ export default function MovimientosBancariosTabla() {
     try {
       const formData = new FormData();
       uploadFiles.forEach((file) => formData.append('files', file));
-      const response = await fetch('https://n8n.myinfo.la/webhook/oraculo/normalizador-edos-cuenta', { method: 'POST', body: formData });
+      const response = await fetch('https://n8n.myinfo.la/webhook-test/oraculo/normalizador-edos-cuenta', { method: 'POST', body: formData });
       if (!response.ok) throw new Error(`Error del servidor: ${response.statusText}`);
       showNotification('success', `${uploadFiles.length} estado(s) de cuenta enviado(s) para procesamiento.`);
       setUploadFiles([]); setUploadSuccess(true);
@@ -260,7 +265,7 @@ export default function MovimientosBancariosTabla() {
               marginBottom: uploadFiles.length > 0 || uploadSuccess ? '16px' : 0,
             }}
           >
-            <input type="file" multiple accept=".txt,text/plain" ref={fileInputRef} onChange={handleFileInputChange} style={{ display: 'none' }} />
+            <input type="file" multiple accept=".txt,text/plain,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ref={fileInputRef} onChange={handleFileInputChange} style={{ display: 'none' }} />
             {uploadSuccess ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
                 <CheckCircle2 size={24} color="#16a34a" />
@@ -271,7 +276,7 @@ export default function MovimientosBancariosTabla() {
                 <UploadCloud size={24} color={isDragging ? 'var(--primary-color)' : '#94a3b8'} />
                 <div style={{ textAlign: 'left' }}>
                   <p style={{ margin: 0, fontWeight: 600, color: '#334155', fontSize: '0.95rem' }}>Haz clic o arrastra archivos aquí</p>
-                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>Solo .txt (estados de cuenta BBVA)</p>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>Archivos .txt o .xlsx (estados de cuenta BBVA)</p>
                 </div>
               </div>
             )}

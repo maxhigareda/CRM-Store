@@ -84,6 +84,102 @@ const fmtCell = (col: string, row: Factura) => {
 
 const sanitize = (s: string) => s.replace(/[(),%*]/g, '').trim();
 
+// ──────────────────────────────────────────────
+// Panel read-only: complementos del CFDI (impuestos, pago, nómina, relacionados)
+// Lee directamente las columnas JSONB de la fila.
+// ──────────────────────────────────────────────
+const secStyle: React.CSSProperties = { marginTop: 8, border: '1px solid var(--border-color)', borderRadius: 8, overflow: 'hidden' };
+const secHead: React.CSSProperties = { padding: '8px 12px', background: '#f8fafc', fontWeight: 700, fontSize: '0.8rem', color: 'var(--text-main)', borderBottom: '1px solid var(--border-color)' };
+const cell: React.CSSProperties = { padding: '6px 10px', fontSize: '0.78rem', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' };
+const th: React.CSSProperties = { ...cell, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', fontSize: '0.68rem', background: '#fcfdfe' };
+
+function MiniTable({ headers, rows }: { headers: string[]; rows: (string | number | null)[][] }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr>{headers.map((h, i) => <th key={i} style={{ ...th, textAlign: i === 0 ? 'left' : 'right' }}>{h}</th>)}</tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>{r.map((c, j) => <td key={j} style={{ ...cell, textAlign: j === 0 ? 'left' : 'right' }}>{c ?? '—'}</td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ComplementosCFDI({ factura }: { factura: Factura }) {
+  const imp = factura.impuestos as any[] | null;
+  const cp = factura.complemento_pago as any | null;
+  const nom = factura.nomina as any | null;
+  const rel = factura.cfdi_relacionados as any[] | null;
+  if (!imp && !cp && !nom && !rel) return null;
+
+  return (
+    <div style={{ marginTop: 24 }}>
+      <h4 style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-main)', margin: '0 0 4px' }}>Complementos del CFDI</h4>
+
+      {imp && imp.length > 0 && (
+        <div style={secStyle}>
+          <div style={secHead}>Impuestos</div>
+          <MiniTable
+            headers={['Tipo', 'Impuesto', 'Base', 'Tasa', 'Importe']}
+            rows={imp.map((t) => [
+              t.tipo, t.impuesto, fmtMoney(t.base, factura.moneda),
+              t.tasa_o_cuota != null ? `${(Number(t.tasa_o_cuota) * 100).toFixed(2)}%` : '—',
+              fmtMoney(t.importe, factura.moneda),
+            ])}
+          />
+        </div>
+      )}
+
+      {cp && Array.isArray(cp.pagos) && cp.pagos.map((p: any, idx: number) => (
+        <div key={idx} style={secStyle}>
+          <div style={secHead}>
+            Pago {cp.pagos.length > 1 ? `#${idx + 1}` : ''} · {p.fecha_pago?.slice(0, 10) ?? '—'} · {fmtMoney(p.monto, p.moneda_p)} {p.moneda_p}
+            {p.tipo_cambio_p && p.tipo_cambio_p !== 1 ? ` · TC ${p.tipo_cambio_p}` : ''}
+          </div>
+          {Array.isArray(p.docs_relacionados) && p.docs_relacionados.length > 0 && (
+            <MiniTable
+              headers={['Doc. relacionado (UUID)', 'Serie-Folio', 'Parc.', 'Saldo ant.', 'Pagado', 'Saldo insoluto']}
+              rows={p.docs_relacionados.map((d: any) => [
+                d.id_documento, [d.serie, d.folio].filter(Boolean).join('-') || '—', d.num_parcialidad,
+                fmtMoney(d.imp_saldo_ant, d.moneda_dr), fmtMoney(d.imp_pagado, d.moneda_dr), fmtMoney(d.imp_saldo_insoluto, d.moneda_dr),
+              ])}
+            />
+          )}
+        </div>
+      ))}
+
+      {nom && (
+        <div style={secStyle}>
+          <div style={secHead}>
+            Nómina · {nom.empleado?.num_empleado ? `Emp. ${nom.empleado.num_empleado}` : ''} {nom.empleado?.puesto ?? ''}
+            {' · '}Percep. {fmtMoney(nom.total_percepciones)} · Deduc. {fmtMoney(nom.total_deducciones)}
+          </div>
+          <MiniTable
+            headers={['Percepción', 'Gravado', 'Exento']}
+            rows={(nom.percepciones ?? []).map((x: any) => [x.concepto, fmtMoney(x.importe_gravado), fmtMoney(x.importe_exento)])}
+          />
+          {(nom.deducciones ?? []).length > 0 && (
+            <MiniTable headers={['Deducción', 'Importe']} rows={(nom.deducciones ?? []).map((x: any) => [x.concepto, fmtMoney(x.importe)])} />
+          )}
+        </div>
+      )}
+
+      {rel && rel.length > 0 && (
+        <div style={secStyle}>
+          <div style={secHead}>CFDI relacionados</div>
+          <MiniTable
+            headers={['Tipo relación', 'UUIDs']}
+            rows={rel.map((g) => [g.tipo_relacion, (g.uuids ?? []).join(', ')])}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function FacturasTabla() {
   const { showNotification } = useNotification();
 
@@ -206,15 +302,35 @@ export default function FacturasTabla() {
     if (uploadFiles.length === 0) return;
     setIsUploading(true); setUploadSuccess(false);
     try {
-      const formData = new FormData();
-      uploadFiles.forEach((file) => formData.append('files', file));
-      const response = await fetch('https://n8n.myinfo.la/webhook/oraculo/clasificador-facturas', { method: 'POST', body: formData });
-      if (!response.ok) throw new Error(`Error del servidor: ${response.statusText}`);
-      showNotification('success', `${uploadFiles.length} archivo(s) enviado(s) para clasificación.`);
+      const xmls = uploadFiles.filter((f) => f.name.toLowerCase().endsWith('.xml'));
+      const pdfs = uploadFiles.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
+      const msgs: string[] = [];
+
+      // XML → Edge Function procesar-cfdi (parseo determinista en código, sin n8n).
+      if (xmls.length > 0) {
+        const files = await Promise.all(
+          xmls.map(async (f) => ({ name: f.name, xml: await f.text() })),
+        );
+        const { data, error } = await supabase.functions.invoke('procesar-cfdi', { body: { files } });
+        if (error) throw new Error(error.message);
+        const errCount = data?.errors?.length ?? 0;
+        msgs.push(`${data?.inserted ?? 0} XML procesado(s)${errCount ? ` · ${errCount} con error` : ''}`);
+      }
+
+      // PDF → sigue en n8n por ahora (migración a código pendiente).
+      if (pdfs.length > 0) {
+        const formData = new FormData();
+        pdfs.forEach((file) => formData.append('files', file));
+        const response = await fetch('https://n8n.myinfo.la/webhook/oraculo/clasificador-facturas', { method: 'POST', body: formData });
+        if (!response.ok) throw new Error(`Error del servidor (PDF): ${response.statusText}`);
+        msgs.push(`${pdfs.length} PDF enviado(s) a clasificación`);
+      }
+
+      showNotification('success', msgs.join(' · ') || 'Sin archivos procesables.');
       setUploadFiles([]); setUploadSuccess(true);
       fetchRows();
     } catch (error: any) {
-      showNotification('error', 'Error al clasificar: ' + error.message);
+      showNotification('error', 'Error al procesar: ' + error.message);
     } finally {
       setIsUploading(false);
     }
@@ -433,6 +549,7 @@ export default function FacturasTabla() {
                     </div>
                   ))}
                 </div>
+                <ComplementosCFDI factura={editing} />
               </div>
               <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '20px 32px', borderTop: '1px solid var(--border-color)', background: '#fcfdfe' }}>
                 <button type="button" className="btn btn-secondary" onClick={closeEdit} disabled={saving}>Cancelar</button>

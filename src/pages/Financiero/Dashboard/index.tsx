@@ -12,7 +12,7 @@ import {
   type TooltipItem,
 } from 'chart.js';
 import { Bar, Doughnut } from 'react-chartjs-2';
-import { Loader2, TrendingUp, TrendingDown, Scale, Receipt, Hash, Wallet } from 'lucide-react';
+import { Loader2, TrendingUp, TrendingDown, Scale, Receipt, Hash, Wallet, Users } from 'lucide-react';
 import { useNotification } from '../../../contexts/NotificationContext';
 import {
   fetchDashboard,
@@ -341,28 +341,36 @@ export default function Dashboard() {
           sub="Facturas recibidas"
         />
         <KpiCard
+          label="Nómina"
+          value={formatMXN(kpis.nominaTotal)}
+          icon={<Users size={18} />}
+          color="#f97316"
+          bgColor="#ffedd5"
+          sub="CFDI nómina emitida"
+        />
+        <KpiCard
           label="Balance neto"
           value={formatMXN(kpis.balance)}
           icon={<Scale size={18} />}
           color={kpis.balance >= 0 ? COLOR_INGRESOS : COLOR_GASTOS}
           bgColor={kpis.balance >= 0 ? '#dcfce7' : '#fee2e2'}
-          sub="Ingresos − Gastos"
+          sub="Ingresos − Gastos − Nómina"
         />
         <KpiCard
-          label="IVA acumulado"
+          label="IVA trasladado"
           value={formatMXN(kpis.ivaTotal)}
           icon={<Receipt size={18} />}
           color="#8b5cf6"
           bgColor="#f3e8ff"
-          sub="Total − Subtotal"
+          sub="Real (impuestos CFDI)"
         />
         <KpiCard
-          label="# Facturas"
+          label="# Facturas (ventas)"
           value={kpis.numFacturas.toString()}
           icon={<Hash size={18} />}
           color="#0070f3"
           bgColor="#dbeafe"
-          sub="Con monto > 0"
+          sub="Ingresos + Gastos tipo I"
         />
         <KpiCard
           label="Ticket promedio"
