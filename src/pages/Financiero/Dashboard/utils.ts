@@ -66,6 +66,15 @@ export interface CuentasPorCobrar {
   facturas: FacturaPorCobrar[]; // detalle (más vencidas primero)
 }
 
+// ── Facturación por moneda / entidad (emitidas de ingreso, SIN conversión) ──
+// Responde: ¿cuánto se facturó en MXN, cuánto en USD por la SA de CV y cuánto en
+// USD por la operación AMERICAS LLC?
+export interface FacturacionInsights {
+  mxn:         { total: number; num: number }; // MXN (Store Intelligence SA de CV)
+  usdSaCv:     { total: number; num: number }; // USD a clientes con RFC mexicano
+  usdAmericas: { total: number; num: number }; // USD a clientes extranjeros (AMERICAS LLC)
+}
+
 export interface DashboardData {
   totalRegistros: number;
   kpis: KPIs;
@@ -74,6 +83,7 @@ export interface DashboardData {
   proveedores: ProveedorTotal[];
   ultimas: UltimaFactura[];
   cxc: CuentasPorCobrar;
+  facturacion: FacturacionInsights;
   mesesDisponibles: string[];
 }
 
@@ -102,6 +112,17 @@ interface FacturaRow {
 // ──────────────────────────────────────────────
 export const formatMXN = (n: number): string =>
   new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n);
+
+// Formato en USD sin conversión (moneda nativa del comprobante).
+export const formatUSD = (n: number): string =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
+
+// Identificación de la entidad Store Intelligence que factura en USD.
+// SA de CV = entidad mexicana; AMERICAS LLC = operación de exportación en USD a
+// clientes con RFC extranjero genérico (XEXX010101000, p.ej. Nestlé LATAM).
+// Si la regla de separación cambia, ajústese SOLO esta constante/lógica.
+const RFC_RECEPTOR_EXTRANJERO = 'XEXX010101000';
+const esAmericasUSD = (r: FacturaRow): boolean => r.rfc_receptor === RFC_RECEPTOR_EXTRANJERO;
 
 const num = (v: unknown): number => Number(v) || 0;
 
@@ -273,6 +294,25 @@ export async function fetchDashboard(mes: string, tipo: string): Promise<Dashboa
     facturas: [...facturasCxC].sort((a, b) => b.diasVencido - a.diasVencido).slice(0, 12),
   };
 
+  // ── Facturación por moneda/entidad (emitidas de ingreso, sin conversión) ──
+  // Respeta el filtro de mes; siempre son EMITIDAS (no depende del filtro de tipo).
+  const facturacion: FacturacionInsights = {
+    mxn:         { total: 0, num: 0 },
+    usdSaCv:     { total: 0, num: 0 },
+    usdAmericas: { total: 0, num: 0 },
+  };
+  for (const r of all) {
+    if (r.tipo_factura !== 'EMITIDA' || r.tipo !== 'I') continue;
+    if (mes !== 'todos' && (r.fecha ?? '').slice(0, 7) !== mes) continue;
+    const monto = num(r.total);
+    if (r.moneda === 'MXN') {
+      facturacion.mxn.total += monto; facturacion.mxn.num++;
+    } else if (r.moneda === 'USD') {
+      const bucket = esAmericasUSD(r) ? facturacion.usdAmericas : facturacion.usdSaCv;
+      bucket.total += monto; bucket.num++;
+    }
+  }
+
   const ultimas: UltimaFactura[] = [...rows]
     .sort((a, b) => (b.fecha ?? '').localeCompare(a.fecha ?? ''))
     .slice(0, 10)
@@ -301,6 +341,7 @@ export async function fetchDashboard(mes: string, tipo: string): Promise<Dashboa
     proveedores,
     ultimas,
     cxc,
+    facturacion,
     mesesDisponibles,
   };
 }

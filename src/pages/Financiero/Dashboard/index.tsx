@@ -15,11 +15,13 @@ import { Bar, Doughnut } from 'react-chartjs-2';
 import {
   Loader2, TrendingUp, TrendingDown, Scale, Receipt, Hash, Wallet, Users,
   Coins, AlertTriangle, CalendarClock, CalendarDays, CalendarRange,
+  Banknote, DollarSign, Globe,
 } from 'lucide-react';
 import { useNotification } from '../../../contexts/NotificationContext';
 import {
   fetchDashboard,
   formatMXN,
+  formatUSD,
   type DashboardData,
 } from './utils';
 
@@ -144,7 +146,7 @@ export default function Dashboard() {
     );
   }
 
-  const { kpis, monthly, categorias, proveedores, ultimas: ultimasFacturas, cxc, mesesDisponibles: availableMonths, totalRegistros } = data;
+  const { kpis, monthly, categorias, proveedores, ultimas: ultimasFacturas, cxc, facturacion, mesesDisponibles: availableMonths, totalRegistros } = data;
 
   // ── Datos de charts ──
   const monthlyChartData = {
@@ -415,6 +417,40 @@ export default function Dashboard() {
           color="#f59e0b"
           bgColor="#fef3c7"
           sub="Por factura"
+        />
+      </div>
+
+      {/* ───────── Facturación por moneda / entidad ───────── */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <DollarSign size={20} style={{ color: '#16a34a' }} /> Facturación por moneda
+        </h2>
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+          Emitidas de ingreso · importes en su moneda nativa (sin conversión)
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
+        <KpiCard
+          label="Facturado MXN"
+          value={formatMXN(facturacion.mxn.total)}
+          icon={<Banknote size={18} />}
+          color="#16a34a" bgColor="#dcfce7"
+          sub={`${facturacion.mxn.num} facturas · moneda nacional`}
+        />
+        <KpiCard
+          label="Facturado USD · SA de CV"
+          value={formatUSD(facturacion.usdSaCv.total)}
+          icon={<DollarSign size={18} />}
+          color="#0070f3" bgColor="#dbeafe"
+          sub={`${facturacion.usdSaCv.num} facturas · Store Intelligence SA de CV`}
+        />
+        <KpiCard
+          label="Facturado USD · AMERICAS LLC"
+          value={formatUSD(facturacion.usdAmericas.total)}
+          icon={<Globe size={18} />}
+          color="#8b5cf6" bgColor="#f3e8ff"
+          sub={`${facturacion.usdAmericas.num} facturas · Store Intelligence Americas LLC`}
         />
       </div>
 
