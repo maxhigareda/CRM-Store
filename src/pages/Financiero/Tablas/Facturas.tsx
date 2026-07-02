@@ -3,10 +3,21 @@ import {
   Search, X, Loader2, Save, Database, UploadCloud,
   ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight,
   File, FileText, CheckCircle2, ChevronDown, ChevronUp,
+  Tag, Plus, Trash2, Check,
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { useNotification } from '../../../contexts/NotificationContext';
+import { ConfirmModal } from '../../../components/Modals';
 import { ComplementosCFDI, DatosCompletos } from '../components/FacturaDetalle';
+
+// Catalogo de categorias (labels) para clasificar facturas.
+interface Categoria { id: number; nombre: string; color: string | null }
+
+// Paleta para el selector de color al crear categorias (misma que Etiquetas).
+const CAT_COLORS = [
+  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#1e293b', '#6366f1', '#14b8a6',
+  '#f43f5e', '#84cc16', '#eab308', '#d946ef', '#0ea5e9', '#64748b', '#475569', '#f97316', '#a855f7', '#22c55e',
+];
 
 // ──────────────────────────────────────────────
 // Definición de la tabla public.facturas
@@ -152,6 +163,25 @@ export default function FacturasTabla() {
   const [form, setForm]       = useState<Factura>({});
   const [saving, setSaving]   = useState(false);
 
+  // ── Borrado físico (hard-delete) ──
+  const [confirmDelete, setConfirmDelete] = useState<Factura | null>(null);
+  const [deleting, setDeleting]           = useState(false);
+
+  // ── Categorias (labels) + clasificacion masiva ──
+  const [categorias, setCategorias]   = useState<Categoria[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkCategoria, setBulkCategoria] = useState('');
+  const [applyingBulk, setApplyingBulk]   = useState(false);
+
+  // Manager de categorias (crear / borrar del catalogo)
+  const [showCatManager, setShowCatManager] = useState(false);
+  const [newCatName, setNewCatName]   = useState('');
+  const [newCatColor, setNewCatColor] = useState(CAT_COLORS[0]);
+  const [catSaving, setCatSaving]     = useState(false);
+
+  const colorFor = (nombre?: string | null) =>
+    (nombre && categorias.find((c) => c.nombre === nombre)?.color) || '#64748b';
+
   // ── Upload ─────────────────────────────────
   const [showUpload, setShowUpload]     = useState(false);
   const [isDragging, setIsDragging]     = useState(false);
@@ -190,6 +220,44 @@ export default function FacturasTabla() {
       setMonedas([...mon].sort());
     })();
   }, []);
+
+  // ── Catalogo de categorias ─────────────────
+  const fetchCategorias = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('categorias_factura')
+      .select('id, nombre, color')
+      .order('nombre');
+    if (!error) setCategorias(data || []);
+  }, []);
+
+  useEffect(() => { fetchCategorias(); }, [fetchCategorias]);
+
+  const handleCreateCategoria = async () => {
+    const nombre = newCatName.trim();
+    if (!nombre) return;
+    setCatSaving(true);
+    const { error } = await supabase
+      .from('categorias_factura')
+      .insert({ nombre, color: newCatColor });
+    setCatSaving(false);
+    if (error) {
+      showNotification('error', error.code === '23505'
+        ? `La categoría "${nombre}" ya existe.`
+        : 'No se pudo crear la categoría: ' + error.message);
+      return;
+    }
+    showNotification('success', `Categoría "${nombre}" creada.`);
+    setNewCatName(''); setNewCatColor(CAT_COLORS[0]);
+    fetchCategorias();
+  };
+
+  const handleDeleteCategoria = async (c: Categoria) => {
+    const { error } = await supabase.from('categorias_factura').delete().eq('id', c.id);
+    if (error) { showNotification('error', 'No se pudo borrar: ' + error.message); return; }
+    // Nota: las facturas ya clasificadas con este texto NO se tocan (sin FK).
+    showNotification('success', `Categoría "${c.nombre}" eliminada del catálogo.`);
+    fetchCategorias();
+  };
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -230,6 +298,39 @@ export default function FacturasTabla() {
     setPage(0);
   };
 
+  // ── Seleccion de filas (para clasificacion masiva) ──
+  const toggleRow = (id: number) => setSelectedIds((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const pageIds = rows.map((r) => r.id as number);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const toggleAllPage = () => setSelectedIds((prev) => {
+    const next = new Set(prev);
+    if (allPageSelected) pageIds.forEach((id) => next.delete(id));
+    else pageIds.forEach((id) => next.add(id));
+    return next;
+  });
+  const clearSelection = () => setSelectedIds(new Set());
+
+  // Aplica una categoria (o la quita si viene null) a todas las filas seleccionadas.
+  const applyBulkCategoria = async (categoria: string | null) => {
+    if (selectedIds.size === 0) return;
+    setApplyingBulk(true);
+    const ids = [...selectedIds];
+    const { error } = await supabase.from('facturas').update({ categoria }).in('id', ids);
+    setApplyingBulk(false);
+    if (error) { showNotification('error', 'No se pudo clasificar: ' + error.message); return; }
+    showNotification('success',
+      categoria
+        ? `${ids.length} factura(s) clasificadas como "${categoria}".`
+        : `Categoría removida de ${ids.length} factura(s).`);
+    setRows((prev) => prev.map((r) => (selectedIds.has(r.id) ? { ...r, categoria } : r)));
+    clearSelection();
+    setBulkCategoria('');
+  };
+
   const hasFilters =
     !!search || !!tipoFilter || !!tipoCfdiFilter || !!monedaFilter ||
     !!emisorFilter || !!receptorFilter || !!fechaDesde || !!fechaHasta;
@@ -265,6 +366,21 @@ export default function FacturasTabla() {
     if (error) { showNotification('error', 'No se pudo guardar: ' + error.message); return; }
     showNotification('success', 'Factura actualizada correctamente.');
     setRows((prev) => prev.map((r) => (r.id === editing.id ? { ...r, ...data } : r)));
+    setEditing(null); setForm({});
+  };
+
+  // Borrado físico: la factura deja de existir (y por ende no cuenta en nada).
+  const handleDeleteFactura = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    const { error } = await supabase.from('facturas').delete().eq('id', confirmDelete.id);
+    setDeleting(false);
+    if (error) { showNotification('error', 'No se pudo eliminar: ' + error.message); return; }
+    showNotification('success', 'Factura eliminada permanentemente.');
+    setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
+    setTotal((t) => Math.max(0, t - 1));
+    setSelectedIds((prev) => { const n = new Set(prev); n.delete(confirmDelete.id); return n; });
+    setConfirmDelete(null);
     setEditing(null); setForm({});
   };
 
@@ -374,15 +490,25 @@ export default function FacturasTabla() {
             </p>
           </div>
         </div>
-        <button
-          onClick={() => { setShowUpload((v) => !v); setUploadSuccess(false); }}
-          className="btn btn-secondary"
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}
-        >
-          <UploadCloud size={16} />
-          Subir facturas
-          {showUpload ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            onClick={() => setShowCatManager(true)}
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}
+          >
+            <Tag size={16} />
+            Categorías
+          </button>
+          <button
+            onClick={() => { setShowUpload((v) => !v); setUploadSuccess(false); }}
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}
+          >
+            <UploadCloud size={16} />
+            Subir facturas
+            {showUpload ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+        </div>
       </div>
 
       {/* Panel de upload colapsable */}
@@ -457,6 +583,60 @@ export default function FacturasTabla() {
         </div>
       )}
 
+      {/* Barra de clasificación masiva */}
+      {selectedIds.size > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
+          marginBottom: '12px', padding: '12px 16px', background: '#eff6ff',
+          border: '1px solid #bfdbfe', borderRadius: '12px', animation: 'fadeIn 0.2s ease',
+        }}>
+          <span style={{ fontWeight: 700, color: '#1e40af', fontSize: '0.9rem' }}>
+            {selectedIds.size} seleccionada{selectedIds.size !== 1 ? 's' : ''}
+          </span>
+          <span style={{ color: '#93c5fd' }}>·</span>
+          <span style={{ fontSize: '0.85rem', color: '#334155' }}>Clasificar como</span>
+          <select
+            value={bulkCategoria}
+            onChange={(e) => setBulkCategoria(e.target.value)}
+            style={{ ...selectStyle, minWidth: '200px' }}
+            disabled={applyingBulk}
+          >
+            <option value="">Elige una categoría…</option>
+            {categorias.map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+          </select>
+          <button
+            className="btn btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            disabled={!bulkCategoria || applyingBulk}
+            onClick={() => applyBulkCategoria(bulkCategoria)}
+          >
+            {applyingBulk ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+            Aplicar
+          </button>
+          <button
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            disabled={applyingBulk}
+            onClick={() => applyBulkCategoria(null)}
+            title="Dejar sin categoría las facturas seleccionadas"
+          >
+            <X size={15} /> Quitar categoría
+          </button>
+          {categorias.length === 0 && (
+            <button className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={() => setShowCatManager(true)}>
+              <Plus size={15} /> Crear categoría
+            </button>
+          )}
+          <button
+            onClick={clearSelection}
+            disabled={applyingBulk}
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
+          >
+            <X size={15} /> Limpiar selección
+          </button>
+        </div>
+      )}
+
       {/* Tabla */}
       <div className="table-container" style={{ position: 'relative' }}>
         <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -525,6 +705,15 @@ export default function FacturasTabla() {
           <table className="table">
             <thead>
               <tr>
+                <th style={{ width: '40px', textAlign: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={allPageSelected}
+                    onChange={toggleAllPage}
+                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                    title="Seleccionar toda la página"
+                  />
+                </th>
                 {COLUMNS.map((col) => (
                   <th key={col.key} onClick={() => col.sortable && toggleSort(col.key)} style={{ cursor: col.sortable ? 'pointer' : 'default', textAlign: col.align || 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: col.align === 'right' ? 'flex-end' : 'flex-start' }}>
@@ -537,10 +726,18 @@ export default function FacturasTabla() {
             </thead>
             <tbody>
               {rows.length === 0 && !loading ? (
-                <tr><td colSpan={COLUMNS.length} style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>No se encontraron facturas.</td></tr>
+                <tr><td colSpan={COLUMNS.length + 1} style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>No se encontraron facturas.</td></tr>
               ) : (
                 rows.map((row) => (
                   <tr key={row.id} onClick={() => openEdit(row)} style={{ cursor: 'pointer' }} className="row-clickable">
+                    <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(row.id)}
+                        onChange={() => toggleRow(row.id)}
+                        style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                      />
+                    </td>
                     {COLUMNS.map((col) => {
                       const truncate = col.key === 'emisor' || col.key === 'receptor';
                       return (
@@ -559,6 +756,12 @@ export default function FacturasTabla() {
                           <span className="badge" style={{ background: row.tipo_factura === 'EMITIDA' ? '#dcfce7' : '#dbeafe', color: row.tipo_factura === 'EMITIDA' ? '#166534' : '#1e40af' }}>
                             {row.tipo_factura}
                           </span>
+                        ) : col.key === 'categoria' ? (
+                          row.categoria ? (
+                            <span className="badge" style={{ background: `${colorFor(row.categoria)}18`, color: colorFor(row.categoria), fontWeight: 700 }}>
+                              {row.categoria}
+                            </span>
+                          ) : '—'
                         ) : fmtCell(col.key, row)}
                       </td>
                       );
@@ -598,7 +801,18 @@ export default function FacturasTabla() {
                   {FIELDS.map((f) => (
                     <div className="form-group" key={f.key} style={{ gridColumn: f.span2 ? '1 / -1' : undefined, marginBottom: 0 }}>
                       <label>{f.label}</label>
-                      {f.type === 'select' ? (
+                      {f.key === 'categoria' ? (
+                        // Categoria: elegir del catalogo predefinido (no texto libre).
+                        // Si la factura ya trae un valor que no esta en el catalogo, se
+                        // conserva como opcion para no perderlo.
+                        <select className="form-input" value={form.categoria ?? ''} onChange={(e) => setField('categoria', e.target.value)}>
+                          <option value="">— Sin categoría —</option>
+                          {categorias.map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+                          {form.categoria && !categorias.some((c) => c.nombre === form.categoria) && (
+                            <option value={form.categoria}>{form.categoria} (fuera de catálogo)</option>
+                          )}
+                        </select>
+                      ) : f.type === 'select' ? (
                         <select className="form-input" value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)}>
                           <option value="">—</option>
                           {f.options!.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
@@ -614,16 +828,117 @@ export default function FacturasTabla() {
                 <DatosCompletos factura={editing} skipKeys={new Set(FIELDS.map((f) => f.key))} title="Datos completos del comprobante (origen)" />
                 <ComplementosCFDI factura={editing} />
               </div>
-              <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '20px 32px', borderTop: '1px solid var(--border-color)', background: '#fcfdfe' }}>
-                <button type="button" className="btn btn-secondary" onClick={closeEdit} disabled={saving}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {saving ? <><Loader2 size={16} className="animate-spin" />Guardando…</> : <><Save size={16} />Guardar cambios</>}
+              <div className="modal-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '20px 32px', borderTop: '1px solid var(--border-color)', background: '#fcfdfe' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setConfirmDelete(editing)} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444' }}>
+                  <Trash2 size={16} /> Eliminar factura
                 </button>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button type="button" className="btn btn-secondary" onClick={closeEdit} disabled={saving}>Cerrar</button>
+                  <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {saving ? <><Loader2 size={16} className="animate-spin" />Guardando…</> : <><Save size={16} />Guardar cambios</>}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* Modal: gestión del catálogo de categorías */}
+      {showCatManager && (
+        <div className="modal-overlay" onClick={() => setShowCatManager(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '520px', display: 'flex', flexDirection: 'column', maxHeight: '85vh' }}>
+            <div className="modal-header">
+              <div>
+                <h3 className="modal-title" style={{ margin: 0 }}>Categorías</h3>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Catálogo de etiquetas para clasificar facturas
+                </span>
+              </div>
+              <button className="modal-close" onClick={() => setShowCatManager(false)}><X size={20} /></button>
+            </div>
+
+            <div style={{ padding: '20px 24px', overflowY: 'auto' }}>
+              {/* Crear nueva */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '8px', letterSpacing: '0.02em' }}>
+                  NUEVA CATEGORÍA
+                </label>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Ej: Servicios contables"
+                    value={newCatName}
+                    onChange={(e) => setNewCatName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleCreateCategoria(); }}
+                    style={{ flex: 1, marginBottom: 0 }}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}
+                    disabled={catSaving || !newCatName.trim()}
+                    onClick={handleCreateCategoria}
+                  >
+                    {catSaving ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} Crear
+                  </button>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
+                  {CAT_COLORS.map((c) => (
+                    <div
+                      key={c}
+                      onClick={() => setNewCatColor(c)}
+                      style={{ width: '20px', height: '20px', borderRadius: '5px', backgroundColor: c, border: newCatColor === c ? '2px solid #000' : 'none', cursor: 'pointer' }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Lista */}
+              <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', marginBottom: '10px', letterSpacing: '0.02em' }}>
+                {categorias.length} CATEGORÍA{categorias.length !== 1 ? 'S' : ''} REGISTRADA{categorias.length !== 1 ? 'S' : ''}
+              </label>
+              <div style={{ display: 'grid', gap: '8px' }}>
+                {categorias.map((c) => (
+                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '10px 14px' }}>
+                    <span className="badge" style={{ background: `${c.color || '#64748b'}18`, color: c.color || '#64748b', fontWeight: 700 }}>
+                      {c.nombre}
+                    </span>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ padding: '6px', color: '#ef4444' }}
+                      title="Eliminar del catálogo (no afecta facturas ya clasificadas)"
+                      onClick={() => handleDeleteCategoria(c)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+                {categorias.length === 0 && (
+                  <p style={{ textAlign: 'center', padding: '24px', color: '#94a3b8', fontSize: '0.85rem' }}>
+                    Aún no hay categorías. Crea la primera arriba.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmación de borrado físico de factura */}
+      <ConfirmModal
+        isOpen={confirmDelete !== null}
+        title="Eliminar factura"
+        message={
+          `Esta factura se eliminará de forma permanente y dejará de existir en el módulo Financiero ` +
+          `(dashboard, conciliación y totales). Esta acción no se puede deshacer.` +
+          (confirmDelete ? ` — Folio ${confirmDelete.serie ?? ''} ${confirmDelete.folio ?? ''} · ${fmtMoney(confirmDelete.total, confirmDelete.moneda)}` : '')
+        }
+        confirmText={deleting ? 'Eliminando…' : 'Sí, eliminar factura'}
+        isDestructive={true}
+        onConfirm={handleDeleteFactura}
+        onClose={() => { if (!deleting) setConfirmDelete(null); }}
+      />
     </div>
   );
 }
