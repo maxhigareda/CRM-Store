@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Table2,
   Scale,
+  HandCoins,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -45,6 +46,11 @@ export default function FinancieroSidebar() {
         <NavLink to="/financiero/conciliacion" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Conciliación">
           <Scale size={18} />
           <span>Conciliación</span>
+        </NavLink>
+
+        <NavLink to="/financiero/cuentas-por-cobrar" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Cuentas por Cobrar">
+          <HandCoins size={18} />
+          <span>Cuentas por Cobrar</span>
         </NavLink>
 
         <div className="nav-section">BASE DE DATOS</div>

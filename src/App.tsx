@@ -16,6 +16,7 @@ import Home from './pages/Home';
 import Dashboard from './pages/Financiero/Dashboard';
 import FacturasTabla from './pages/Financiero/Tablas/Facturas';
 import Conciliacion from './pages/Financiero/Conciliacion';
+import CuentasPorCobrar from './pages/Financiero/CuentasPorCobrar';
 import MovimientosBancariosTabla from './pages/Financiero/Tablas/MovimientosBancarios';
 
 function App() {
@@ -43,6 +44,7 @@ function App() {
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="conciliacion" element={<Conciliacion />} />
+              <Route path="cuentas-por-cobrar" element={<CuentasPorCobrar />} />
               <Route path="tablas/facturas" element={<FacturasTabla />} />
               <Route path="tablas/movimientos" element={<MovimientosBancariosTabla />} />
               <Route path="clients" element={<Clients />} />
