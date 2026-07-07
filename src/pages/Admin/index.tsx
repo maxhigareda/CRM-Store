@@ -18,6 +18,7 @@ interface Profile {
   area_id?: string | null;
   photo_url?: string;
   modules?: string[];
+  can_edit_facturas?: boolean;
 }
 
 const supabaseAdmin = createClient(
@@ -237,14 +238,15 @@ export default function Admin() {
                 <th style={{ padding: '20px' }}>Datos del Usuario</th>
                 <th style={{ padding: '20px' }}>Área Asignada</th>
                 <th style={{ padding: '20px' }}>Módulos</th>
+                <th style={{ padding: '20px' }}>Editar facturas</th>
                 <th style={{ padding: '20px' }}>Rol de Acceso</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={4} style={{ textAlign: 'center', padding: '60px' }}><Loader2 className="animate-spin" style={{ margin: '0 auto', color: 'var(--primary-color)' }} /></td></tr>
+                <tr><td colSpan={6} style={{ textAlign: 'center', padding: '60px' }}><Loader2 className="animate-spin" style={{ margin: '0 auto', color: 'var(--primary-color)' }} /></td></tr>
               ) : users.length === 0 ? (
-                <tr><td colSpan={4} style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No hay usuarios registrados.</td></tr>
+                <tr><td colSpan={6} style={{ textAlign: 'center', padding: '60px', color: '#94a3b8' }}>No hay usuarios registrados.</td></tr>
               ) : users.map(u => (
                 <tr key={u.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <td style={{ padding: '16px 20px' }}>
@@ -344,9 +346,22 @@ export default function Admin() {
                       })}
                     </div>
                   </td>
+                  <td style={{ padding: '16px 20px', textAlign: 'center' }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} title="Permite editar, eliminar y clasificar facturas. Sin marcar: solo lectura.">
+                      <input
+                        type="checkbox"
+                        checked={u.can_edit_facturas === true}
+                        onChange={(e) => handleUpdateUser(u.id, { can_edit_facturas: e.target.checked })}
+                        style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                      />
+                      <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>
+                        {u.can_edit_facturas === true ? 'Sí' : 'No'}
+                      </span>
+                    </label>
+                  </td>
                   <td style={{ padding: '16px 20px' }}>
-                    <select 
-                      value={u.role} 
+                    <select
+                      value={u.role}
                       onChange={(e) => handleUpdateUser(u.id, { role: e.target.value })}
                       className="form-input"
                       style={{ 

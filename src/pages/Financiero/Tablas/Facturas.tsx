@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { useNotification } from '../../../contexts/NotificationContext';
+import { useAuth } from '../../../contexts/AuthContext';
 import { ConfirmModal } from '../../../components/Modals';
 import { ComplementosCFDI, DatosCompletos } from '../components/FacturaDetalle';
 
@@ -119,6 +120,10 @@ const sanitize = (s: string) => s.replace(/[(),%*]/g, '').trim();
 // ──────────────────────────────────────────────
 const N8N_PDF_WEBHOOK = 'https://n8n.myinfo.la/webhook/oraculo/clasificador-facturas';
 
+// Timeout de espera del webhook de n8n al procesar PDF. La extracción pasa por
+// Hermes (LLM) y puede tardar con varios archivos; ajusta aquí si hace falta.
+const N8N_PDF_TIMEOUT_MS = 300_000; // 5 min
+
 // Solo se persisten columnas reales de `facturas` (whitelist): si n8n agrega
 // campos extra del clasificador (ej. categoria_id, confianza, nota) se ignoran y
 // no rompen el INSERT. `categoria` SÍ se persiste (= categoria_nombre del clasificador).
@@ -133,8 +138,27 @@ const PDF_FACTURA_COLS = [
 const pdfDedupKey = (r: any) =>
   ['PDF', r.emisor ?? '', r.folio ?? '', r.fecha ?? '', r.total ?? '', String(r.conceptos ?? '').slice(0, 80)].join('|');
 
+// Una nómina puede traer filas 100% idénticas (dos consultores cobrando lo mismo):
+// misma llave base → chocan en el upsert ("cannot affect row a second time"). Se
+// desambiguan con un índice de ocurrencia (#1, #2…) por llave dentro del lote. La
+// 1.ª ocurrencia queda sin sufijo para no romper llaves ya persistidas, y como el
+// orden del PDF es estable, re-subir el mismo archivo reproduce las mismas llaves.
+const withOccurrenceIndex = (rows: any[]): string[] => {
+  const seen = new Map<string, number>();
+  return rows.map((r) => {
+    const base = pdfDedupKey(r);
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return n === 0 ? base : `${base}|#${n}`;
+  });
+};
+
 export default function FacturasTabla() {
   const { showNotification } = useNotification();
+  const { profile } = useAuth();
+  // Whitelist de edición: sin el flag, el módulo es de solo lectura. El RLS de
+  // `facturas` hace cumplir esto en la API; aquí solo ocultamos/deshabilitamos.
+  const canEdit = profile?.can_edit_facturas === true;
 
   // ── Tabla ──────────────────────────────────
   const [rows, setRows]     = useState<Factura[]>([]);
@@ -316,6 +340,7 @@ export default function FacturasTabla() {
 
   // Aplica una categoria (o la quita si viene null) a todas las filas seleccionadas.
   const applyBulkCategoria = async (categoria: string | null) => {
+    if (!canEdit) return;
     if (selectedIds.size === 0) return;
     setApplyingBulk(true);
     const ids = [...selectedIds];
@@ -348,7 +373,7 @@ export default function FacturasTabla() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editing) return;
+    if (!editing || !canEdit) return;
     setSaving(true);
 
     const payload: Factura = {};
@@ -371,7 +396,7 @@ export default function FacturasTabla() {
 
   // Borrado físico: la factura deja de existir (y por ende no cuenta en nada).
   const handleDeleteFactura = async () => {
-    if (!confirmDelete) return;
+    if (!confirmDelete || !canEdit) return;
     setDeleting(true);
     const { error } = await supabase.from('facturas').delete().eq('id', confirmDelete.id);
     setDeleting(false);
@@ -433,7 +458,17 @@ export default function FacturasTabla() {
       if (pdfs.length > 0) {
         const formData = new FormData();
         pdfs.forEach((file) => formData.append('files', file));
-        const response = await fetch(N8N_PDF_WEBHOOK, { method: 'POST', body: formData });
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), N8N_PDF_TIMEOUT_MS);
+        let response: Response;
+        try {
+          response = await fetch(N8N_PDF_WEBHOOK, { method: 'POST', body: formData, signal: ctrl.signal });
+        } catch (err: any) {
+          if (err?.name === 'AbortError') throw new Error(`El procesamiento de PDF superó el tiempo de espera (${N8N_PDF_TIMEOUT_MS / 1000}s).`);
+          throw err;
+        } finally {
+          clearTimeout(timer);
+        }
         if (!response.ok) throw new Error(`Error del servidor (PDF): ${response.statusText}`);
 
         // Defensivo: aceptar array directo o envuelto ({rows|data}), y string con
@@ -448,14 +483,18 @@ export default function FacturasTabla() {
         const okRows  = rawRows.filter((r) => r && !r.error);
 
         if (okRows.length > 0) {
-          const rows = okRows.map((r) => {
+          const dedupKeys = withOccurrenceIndex(okRows);
+          const rows = okRows.map((r, i) => {
             const row: Record<string, any> = {};
             for (const c of PDF_FACTURA_COLS) if (c in r) row[c] = r[c];
             row.formato_origen = 'PDF';
-            row.dedup_key = pdfDedupKey(r);
+            row.dedup_key = dedupKeys[i];
             return row;
           });
-          const { error } = await supabase.from('facturas').upsert(rows, { onConflict: 'dedup_key' });
+          // ignoreDuplicates (ON CONFLICT DO NOTHING): re-subir el mismo PDF omite
+          // los repetidos sin sobrescribir. Además evita que el upload requiera
+          // permiso de UPDATE (reservado a la whitelist) por un choque de dedup.
+          const { error } = await supabase.from('facturas').upsert(rows, { onConflict: 'dedup_key', ignoreDuplicates: true });
           if (error) throw new Error(`Upsert PDF: ${error.message}`);
         }
         msgs.push(`${okRows.length} fila(s) de PDF cargada(s)${errRows.length ? ` · ${errRows.length} con error de extracción` : ''}`);
@@ -584,7 +623,7 @@ export default function FacturasTabla() {
       )}
 
       {/* Barra de clasificación masiva */}
-      {selectedIds.size > 0 && (
+      {canEdit && selectedIds.size > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
           marginBottom: '12px', padding: '12px 16px', background: '#eff6ff',
@@ -705,15 +744,17 @@ export default function FacturasTabla() {
           <table className="table">
             <thead>
               <tr>
-                <th style={{ width: '40px', textAlign: 'center' }}>
-                  <input
-                    type="checkbox"
-                    checked={allPageSelected}
-                    onChange={toggleAllPage}
-                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                    title="Seleccionar toda la página"
-                  />
-                </th>
+                {canEdit && (
+                  <th style={{ width: '40px', textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={allPageSelected}
+                      onChange={toggleAllPage}
+                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                      title="Seleccionar toda la página"
+                    />
+                  </th>
+                )}
                 {COLUMNS.map((col) => (
                   <th key={col.key} onClick={() => col.sortable && toggleSort(col.key)} style={{ cursor: col.sortable ? 'pointer' : 'default', textAlign: col.align || 'left', whiteSpace: 'nowrap', userSelect: 'none' }}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: col.align === 'right' ? 'flex-end' : 'flex-start' }}>
@@ -726,18 +767,20 @@ export default function FacturasTabla() {
             </thead>
             <tbody>
               {rows.length === 0 && !loading ? (
-                <tr><td colSpan={COLUMNS.length + 1} style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>No se encontraron facturas.</td></tr>
+                <tr><td colSpan={COLUMNS.length + (canEdit ? 1 : 0)} style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>No se encontraron facturas.</td></tr>
               ) : (
                 rows.map((row) => (
                   <tr key={row.id} onClick={() => openEdit(row)} style={{ cursor: 'pointer' }} className="row-clickable">
-                    <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(row.id)}
-                        onChange={() => toggleRow(row.id)}
-                        style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                      />
-                    </td>
+                    {canEdit && (
+                      <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(row.id)}
+                          onChange={() => toggleRow(row.id)}
+                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                      </td>
+                    )}
                     {COLUMNS.map((col) => {
                       const truncate = col.key === 'emisor' || col.key === 'receptor';
                       return (
@@ -790,7 +833,7 @@ export default function FacturasTabla() {
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '760px', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
             <div className="modal-header">
               <div>
-                <h3 className="modal-title" style={{ margin: 0 }}>Editar factura</h3>
+                <h3 className="modal-title" style={{ margin: 0 }}>{canEdit ? 'Editar factura' : 'Ver factura'}</h3>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>id: {editing.id}</span>
               </div>
               <button className="modal-close" onClick={closeEdit}><X size={20} /></button>
@@ -805,7 +848,7 @@ export default function FacturasTabla() {
                         // Categoria: elegir del catalogo predefinido (no texto libre).
                         // Si la factura ya trae un valor que no esta en el catalogo, se
                         // conserva como opcion para no perderlo.
-                        <select className="form-input" value={form.categoria ?? ''} onChange={(e) => setField('categoria', e.target.value)}>
+                        <select className="form-input" value={form.categoria ?? ''} onChange={(e) => setField('categoria', e.target.value)} disabled={!canEdit}>
                           <option value="">— Sin categoría —</option>
                           {categorias.map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
                           {form.categoria && !categorias.some((c) => c.nombre === form.categoria) && (
@@ -813,14 +856,14 @@ export default function FacturasTabla() {
                           )}
                         </select>
                       ) : f.type === 'select' ? (
-                        <select className="form-input" value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)}>
+                        <select className="form-input" value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} disabled={!canEdit}>
                           <option value="">—</option>
                           {f.options!.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                         </select>
                       ) : f.type === 'textarea' ? (
-                        <textarea className="form-input" rows={3} value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} style={{ resize: 'vertical' }} />
+                        <textarea className="form-input" rows={3} value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} style={{ resize: 'vertical' }} disabled={!canEdit} />
                       ) : (
-                        <input className="form-input" type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'} step={f.type === 'number' ? '0.01' : undefined} value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} style={f.key === 'cfdi_uuid' ? { textTransform: 'uppercase' } : undefined} />
+                        <input className="form-input" type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'} step={f.type === 'number' ? '0.01' : undefined} value={form[f.key] ?? ''} onChange={(e) => setField(f.key, e.target.value)} style={f.key === 'cfdi_uuid' ? { textTransform: 'uppercase' } : undefined} disabled={!canEdit} />
                       )}
                     </div>
                   ))}
@@ -829,14 +872,18 @@ export default function FacturasTabla() {
                 <ComplementosCFDI factura={editing} />
               </div>
               <div className="modal-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '20px 32px', borderTop: '1px solid var(--border-color)', background: '#fcfdfe' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setConfirmDelete(editing)} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444' }}>
-                  <Trash2 size={16} /> Eliminar factura
-                </button>
+                {canEdit ? (
+                  <button type="button" className="btn btn-secondary" onClick={() => setConfirmDelete(editing)} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444' }}>
+                    <Trash2 size={16} /> Eliminar factura
+                  </button>
+                ) : <span />}
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <button type="button" className="btn btn-secondary" onClick={closeEdit} disabled={saving}>Cerrar</button>
-                  <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {saving ? <><Loader2 size={16} className="animate-spin" />Guardando…</> : <><Save size={16} />Guardar cambios</>}
-                  </button>
+                  {canEdit && (
+                    <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {saving ? <><Loader2 size={16} className="animate-spin" />Guardando…</> : <><Save size={16} />Guardar cambios</>}
+                    </button>
+                  )}
                 </div>
               </div>
             </form>

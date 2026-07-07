@@ -10,6 +10,7 @@ export interface UserProfile {
   area_id?: string;
   photo_url?: string;
   modules?: string[];
+  can_edit_facturas?: boolean;
 }
 
 interface AuthContextType {
