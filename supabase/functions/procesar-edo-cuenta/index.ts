@@ -1,11 +1,14 @@
 // Edge Function: procesar-edo-cuenta
-// Recibe estados de cuenta BBVA (TSV), los parsea de forma DETERMINISTA (sin LLM)
-// y hace upsert idempotente (por dedup_key) en `public.movimientos_bancarios`.
-// Reemplaza al webhook de n8n "normalizador-edos-cuenta".
+// Recibe estados de cuenta BBVA (PDF oficial) ya extraidos a items con
+// coordenadas, los parsea de forma DETERMINISTA (sin LLM) con el modulo
+// compartido y hace upsert idempotente (por dedup_key) en
+// `public.movimientos_bancarios`. Reemplaza al webhook de n8n.
 //
-// Input  (POST JSON): { files: [{ name: string, text: string }] }
-//   `text` es el contenido del TXT ya decodificado a string (el cliente decide
-//   el encoding; los export de BBVA son Latin-1, decodificar alla).
+// La extraccion bytes->items (pdfjs) la hace el cliente (browser) porque pdfjs
+// corre de forma robusta en el DOM; aqui llega ya como datos, sin dependencias.
+//
+// Input  (POST JSON): { files: [{ name: string, pages: Item[][] }] }
+//   Item = { x, y, right, s }  (ver _shared/edocuenta.mjs -> itemsFromTextContent)
 // Output (JSON):      { processed, inserted, errors: [{ file, msg }] }
 
 import { createClient } from "@supabase/supabase-js";
@@ -34,7 +37,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  let files: Array<{ name: string; text: string }>;
+  let files: Array<{ name: string; pages: unknown[][] }>;
   try {
     const body = await req.json();
     files = body?.files ?? [];
@@ -50,7 +53,7 @@ Deno.serve(async (req) => {
 
   for (const f of files) {
     try {
-      rows.push(...parseEdoCuenta(f.text, f.name));
+      rows.push(...parseEdoCuenta(f.pages, f.name));
     } catch (e) {
       errors.push({ file: f.name, msg: e instanceof Error ? e.message : String(e) });
     }

@@ -19,6 +19,8 @@ export interface CatalogoRow {
 // Forma cruda de la vista v_cuentas_por_cobrar
 interface CxCViewRow {
   id: number;
+  serie: string | null;
+  folio: string | null;
   receptor: string | null;
   rfc_receptor: string | null;
   fecha: string | null;
@@ -35,6 +37,7 @@ interface CxCViewRow {
 // Fila normalizada que consume el componente
 export interface CxCRow {
   id: number;
+  folio: string;                   // serie-folio de la factura emitida ('—' si falta)
   cliente: string;
   fecha: string;                   // emisión (YYYY-MM-DD)
   diasCredito: number | null;      // null = sin término de crédito
@@ -80,6 +83,14 @@ const num = (v: unknown): number => Number(v) || 0;
 const toMXNAmount = (amount: number, moneda: string | null, tc: number | null): number =>
   moneda && moneda !== 'MXN' && moneda !== 'XXX' && tc ? amount * num(tc) : amount;
 
+// Folio legible de la factura: 'serie-folio', 'folio', o '—' si no hay dato.
+const buildFolio = (serie: string | null, folio: string | null): string => {
+  const s = serie?.trim() || '';
+  const f = folio?.trim() || '';
+  if (s && f) return `${s}-${f}`;
+  return f || s || '—';
+};
+
 const atMidnight = (iso: string): Date => new Date(iso + 'T00:00:00');
 const dayDiff = (a: Date, b: Date): number => Math.floor((a.getTime() - b.getTime()) / 86_400_000);
 
@@ -100,7 +111,7 @@ export const mesActual = (): string => {
 // ── Carga del dataset CxC ────────────────────────────────────────────────────
 export async function fetchCxC(): Promise<CxCDataset> {
   const COLS =
-    'id,receptor,rfc_receptor,fecha,moneda,tipo_cambio,total,saldo_pendiente,estado_conciliacion,dias_credito,fecha_estimada_pago,mes_estimado_pago';
+    'id,serie,folio,receptor,rfc_receptor,fecha,moneda,tipo_cambio,total,saldo_pendiente,estado_conciliacion,dias_credito,fecha_estimada_pago,mes_estimado_pago';
   const PAGE = 1000;
   const raw: CxCViewRow[] = [];
   for (let from = 0; ; from += PAGE) {
@@ -134,6 +145,7 @@ export async function fetchCxC(): Promise<CxCDataset> {
 
     rows.push({
       id: r.id,
+      folio: buildFolio(r.serie, r.folio),
       cliente,
       fecha: r.fecha.slice(0, 10),
       diasCredito: r.dias_credito,

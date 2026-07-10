@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import { useNotification } from '../../../contexts/NotificationContext';
 import { ConfirmModal } from '../../../components/Modals';
+import { supabase } from '../../../lib/supabase';
+import { DatosCompletos, ComplementosCFDI } from '../components/FacturaDetalle';
 import {
   fetchCxC, buildMes, fetchCatalogo, addCatalogo, updateCatalogo, deleteCatalogo,
   formatMXN, mesLabel, mesActual,
@@ -57,6 +59,21 @@ export default function CuentasPorCobrar() {
   const [loading, setLoading] = useState(true);
   const [mes, setMes] = useState<string>('');
   const [showCatalogo, setShowCatalogo] = useState(false);
+
+  // ── Modal de detalle completo de la factura (read-only, misma vista que
+  // Facturas/Conciliación: reutiliza DatosCompletos + ComplementosCFDI) ────────
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailRow, setDetailRow] = useState<Record<string, any> | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const openDetail = async (id: number) => {
+    setDetailOpen(true); setDetailLoading(true); setDetailRow(null);
+    const { data, error } = await supabase.from('facturas').select('*').eq('id', id).single();
+    setDetailLoading(false);
+    if (error) { showNotification('error', 'No se pudo cargar el detalle: ' + error.message); return; }
+    setDetailRow(data);
+  };
+  const closeDetail = () => { setDetailOpen(false); setDetailRow(null); };
 
   const loadData = async () => {
     setLoading(true);
@@ -180,6 +197,7 @@ export default function CuentasPorCobrar() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', textAlign: 'left', color: 'var(--text-muted)' }}>
+                  <th style={th}>Folio</th>
                   <th style={th}>Cliente</th>
                   <th style={th}>Emisión</th>
                   <th style={{ ...th, textAlign: 'center' }}>Días créd.</th>
@@ -192,7 +210,8 @@ export default function CuentasPorCobrar() {
                 {vista && vista.filas.length > 0 ? vista.filas.map((f) => {
                   const vencida = f.diasVencido > 0;
                   return (
-                    <tr key={f.id} style={{ borderTop: '1px solid var(--border-color)' }}>
+                    <tr key={f.id} onClick={() => openDetail(f.id)} className="row-clickable" style={{ borderTop: '1px solid var(--border-color)', cursor: 'pointer' }}>
+                      <td style={{ ...td, fontWeight: 600, whiteSpace: 'nowrap' }} title={f.folio}>{f.folio}</td>
                       <td style={{ ...td, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.cliente}>{f.cliente}</td>
                       <td style={td}>{f.fecha}</td>
                       <td style={{ ...td, textAlign: 'center' }}>{f.diasCredito}</td>
@@ -209,7 +228,7 @@ export default function CuentasPorCobrar() {
                     </tr>
                   );
                 }) : (
-                  <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>Sin facturas por cobrar en este mes.</td></tr>
+                  <tr><td colSpan={7} style={{ ...td, textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>Sin facturas por cobrar en este mes.</td></tr>
                 )}
               </tbody>
             </table>
@@ -223,6 +242,32 @@ export default function CuentasPorCobrar() {
           sugerencias={sinTermino.clientes}
           onChanged={loadData}
         />
+      )}
+
+      {/* Modal de detalle completo de la factura (read-only) */}
+      {detailOpen && (
+        <div className="modal-overlay" onClick={closeDetail}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '760px', maxHeight: '85vh', overflowY: 'auto' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ margin: 0 }}>
+                Detalle de la factura{detailRow?.receptor ? ` · ${detailRow.receptor}` : ''}
+              </h3>
+              <button className="modal-close" onClick={closeDetail}><X size={20} /></button>
+            </div>
+            <div style={{ padding: '20px 24px' }}>
+              {detailLoading || !detailRow ? (
+                <div style={{ padding: '40px', display: 'flex', justifyContent: 'center' }}>
+                  <Loader2 size={24} className="animate-spin" color="var(--primary-color)" />
+                </div>
+              ) : (
+                <>
+                  <DatosCompletos factura={detailRow} title="Datos completos del comprobante" />
+                  <ComplementosCFDI factura={detailRow} />
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

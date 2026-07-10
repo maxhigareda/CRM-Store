@@ -4,8 +4,35 @@ import {
   ArrowUp, ArrowDown, ArrowUpDown, ChevronLeft, ChevronRight,
   File, FileText, CheckCircle2, ChevronDown, ChevronUp,
 } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { supabase } from '../../../lib/supabase';
 import { useNotification } from '../../../contexts/NotificationContext';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
+// Extrae, por pagina, los items de texto con coordenadas del PDF. La forma
+// { x, y, right, s } es el contrato que consume el parser determinista del
+// servidor (supabase/functions/_shared/edocuenta.mjs). El PDF se manda ya
+// extraido; el parseo (clasificar cargo/abono por columna, etc.) vive alla.
+async function extractPdfPages(file: File): Promise<Array<Array<{ x: number; y: number; right: number; s: string }>>> {
+  const data = new Uint8Array(await file.arrayBuffer());
+  const doc = await pdfjsLib.getDocument({ data }).promise;
+  const pages = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const page = await doc.getPage(p);
+    const tc = await page.getTextContent();
+    pages.push(
+      tc.items
+        .map((it: any) => {
+          const x = it.transform[4];
+          return { x, y: it.transform[5], right: x + it.width, s: String(it.str ?? '').trim() };
+        })
+        .filter((i: any) => i.s),
+    );
+  }
+  return pages;
+}
 
 // ──────────────────────────────────────────────
 // Definición de la tabla public.movimientos_bancarios
@@ -229,18 +256,13 @@ export default function MovimientosBancariosTabla() {
     const valid: File[] = [];
     const invalid: string[] = [];
     Array.from(newFiles).forEach((file) => {
-      if (
-        file.type === 'text/plain' ||
-        file.name.endsWith('.txt') ||
-        file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-        file.name.endsWith('.xlsx')
-      ) {
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
         if (!uploadFiles.some((f) => f.name === file.name && f.size === file.size)) valid.push(file);
       } else {
         invalid.push(file.name);
       }
     });
-    if (invalid.length > 0) showNotification('error', `Archivos ignorados: ${invalid.join(', ')}. Solo .txt o .xlsx`);
+    if (invalid.length > 0) showNotification('error', `Archivos ignorados: ${invalid.join(', ')}. Solo .pdf`);
     if (valid.length > 0) { setUploadFiles((prev) => [...prev, ...valid]); setUploadSuccess(false); }
   };
 
@@ -257,30 +279,18 @@ export default function MovimientosBancariosTabla() {
     if (uploadFiles.length === 0) return;
     setIsUploading(true); setUploadSuccess(false);
     try {
-      const txts  = uploadFiles.filter((f) => f.name.toLowerCase().endsWith('.txt'));
-      const otros = uploadFiles.filter((f) => !f.name.toLowerCase().endsWith('.txt'));
-      const msgs: string[] = [];
+      // PDF BBVA (fuente original) → se extrae aquí a items con coordenadas
+      // (pdfjs) y la Edge Function `procesar-edo-cuenta` parsea de forma
+      // determinista (sin n8n, sin LLM) y hace upsert idempotente.
+      const files = await Promise.all(
+        uploadFiles.map(async (f) => ({ name: f.name, pages: await extractPdfPages(f) })),
+      );
+      const { data, error } = await supabase.functions.invoke('procesar-edo-cuenta', { body: { files } });
+      if (error) throw new Error(error.message);
+      const errCount = data?.errors?.length ?? 0;
+      const msg = `${data?.inserted ?? 0} movimiento(s) cargado(s)${errCount ? ` · ${errCount} archivo(s) con error` : ''}`;
 
-      // TXT BBVA → Edge Function procesar-edo-cuenta (parseo determinista en código,
-      // sin n8n). El export de BBVA es Latin-1: hay que decodificarlo como tal,
-      // no con f.text() (que asume UTF-8 y corrompe acentos como "Día").
-      if (txts.length > 0) {
-        const decoder = new TextDecoder('iso-8859-1');
-        const files = await Promise.all(
-          txts.map(async (f) => ({ name: f.name, text: decoder.decode(await f.arrayBuffer()) })),
-        );
-        const { data, error } = await supabase.functions.invoke('procesar-edo-cuenta', { body: { files } });
-        if (error) throw new Error(error.message);
-        const errCount = data?.errors?.length ?? 0;
-        msgs.push(`${data?.inserted ?? 0} movimiento(s) cargado(s)${errCount ? ` · ${errCount} archivo(s) con error` : ''}`);
-      }
-
-      // .xlsx aún no lo soporta el parser nuevo (los export BBVA que manejamos son .txt).
-      if (otros.length > 0) {
-        msgs.push(`${otros.length} archivo(s) no .txt ignorado(s) (formato no soportado aún)`);
-      }
-
-      showNotification('success', msgs.join(' · ') || 'Sin archivos procesables.');
+      showNotification('success', msg);
       setUploadFiles([]); setUploadSuccess(true);
       fetchRows();
     } catch (error: any) {
@@ -339,7 +349,7 @@ export default function MovimientosBancariosTabla() {
               marginBottom: uploadFiles.length > 0 || uploadSuccess ? '16px' : 0,
             }}
           >
-            <input type="file" multiple accept=".txt,text/plain,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ref={fileInputRef} onChange={handleFileInputChange} style={{ display: 'none' }} />
+            <input type="file" multiple accept=".pdf,application/pdf" ref={fileInputRef} onChange={handleFileInputChange} style={{ display: 'none' }} />
             {uploadSuccess ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
                 <CheckCircle2 size={24} color="#16a34a" />
@@ -350,7 +360,7 @@ export default function MovimientosBancariosTabla() {
                 <UploadCloud size={24} color={isDragging ? 'var(--primary-color)' : '#94a3b8'} />
                 <div style={{ textAlign: 'left' }}>
                   <p style={{ margin: 0, fontWeight: 600, color: '#334155', fontSize: '0.95rem' }}>Haz clic o arrastra archivos aquí</p>
-                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>Archivos .txt (estados de cuenta BBVA MXN/USD)</p>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8' }}>Archivos .pdf (estados de cuenta BBVA MXN/USD)</p>
                 </div>
               </div>
             )}

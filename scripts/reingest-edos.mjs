@@ -1,19 +1,34 @@
-// Re-ingesta de estados de cuenta BBVA hacia `public.movimientos_bancarios`.
-// Reutiliza EXACTAMENTE el parser de la Edge Function
-// (supabase/functions/_shared/edocuenta.mjs). Inserta via service_role (omite
-// RLS). Idempotente: upsert por dedup_key.
+// Re-ingesta de estados de cuenta BBVA (PDF oficial) hacia
+// `public.movimientos_bancarios`. Reutiliza EXACTAMENTE el parser de la Edge
+// Function (supabase/functions/_shared/edocuenta.mjs). Inserta via service_role
+// (omite RLS). Idempotente: upsert por dedup_key.
 //
 // Uso:
 //   SUPABASE_SERVICE_ROLE_KEY=xxxx node scripts/reingest-edos.mjs [rutas...]
-// Por defecto procesa rsc/estados-cuenta.
+// Por defecto procesa rsc/estados-cuenta-correctos.
 //
-// Importante: los export de BBVA son Latin-1 (no UTF-8). Se leen como "latin1".
+// La extraccion bytes->items (pdfjs) es la misma logica que corre en el browser;
+// el parseo determinista lo hace el modulo compartido.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
-import { parseEdoCuenta } from "../supabase/functions/_shared/edocuenta.mjs";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { parseEdoCuenta, itemsFromTextContent } from "../supabase/functions/_shared/edocuenta.mjs";
+
+// Extrae los items de texto con coordenadas, pagina por pagina (mismo contrato
+// que el frontend: { x, y, right, s }).
+async function extractPdfPages(path) {
+  const data = new Uint8Array(readFileSync(path));
+  const doc = await getDocument({ data, useSystemFonts: true }).promise;
+  const pages = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const tc = await (await doc.getPage(p)).getTextContent();
+    pages.push(itemsFromTextContent(tc));
+  }
+  return pages;
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -41,26 +56,26 @@ const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { persistSession: false },
 });
 
-// ── recorrer .txt ────────────────────────────────────────
-function walkTxt(dir, out = []) {
+// ── recorrer .pdf ────────────────────────────────────────
+function walkPdf(dir, out = []) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     const st = statSync(p);
-    if (st.isDirectory()) walkTxt(p, out);
-    else if (name.toLowerCase().endsWith(".txt")) out.push(p);
+    if (st.isDirectory()) walkPdf(p, out);
+    else if (name.toLowerCase().endsWith(".pdf")) out.push(p);
   }
   return out;
 }
 
 const targets = (process.argv.slice(2).length
   ? process.argv.slice(2)
-  : ["rsc/estados-cuenta"]
+  : ["rsc/estados-cuenta-correctos"]
 ).map((t) => resolve(ROOT, t));
 
 const files = targets.flatMap((t) => {
-  try { return walkTxt(t); } catch { console.warn("No existe:", t); return []; }
+  try { return walkPdf(t); } catch { console.warn("No existe:", t); return []; }
 });
-console.log(`Encontrados ${files.length} TXT.`);
+console.log(`Encontrados ${files.length} PDF.`);
 
 // ── parsear ──────────────────────────────────────────────
 const rows = [];
@@ -68,7 +83,8 @@ const parseErrors = [];
 for (const f of files) {
   try {
     const name = f.replace(ROOT + "/", "");
-    rows.push(...parseEdoCuenta(readFileSync(f, "latin1"), name));
+    const pages = await extractPdfPages(f);
+    rows.push(...parseEdoCuenta(pages, name));
   } catch (e) {
     parseErrors.push({ file: f, msg: e.message });
   }
