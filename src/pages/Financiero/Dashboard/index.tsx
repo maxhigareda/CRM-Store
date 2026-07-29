@@ -646,7 +646,7 @@ export default function Dashboard() {
       }}>
         <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)' }}>
           <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', margin: 0 }}>
-            Últimas 10 facturas
+            Últimas 10 facturas de ingresos
           </h3>
         </div>
         <div style={{ overflowX: 'auto' }}>

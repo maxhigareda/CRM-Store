@@ -315,8 +315,11 @@ export async function fetchDashboard(mes: string, tipo: string): Promise<Dashboa
     }
   }
 
-  const ultimas: UltimaFactura[] = [...rows]
-    .filter((r) => num(r.total) > 0) // excluye complementos de pago y montos en cero
+  const ultimas: UltimaFactura[] = [...all]
+    .filter((r) => {
+      if (mes !== 'todos' && (r.fecha ?? '').slice(0, 7) !== mes) return false;
+      return r.tipo_factura === 'EMITIDA' && r.tipo === 'I' && num(r.total) > 0;
+    })
     .sort((a, b) => (b.fecha ?? '').localeCompare(a.fecha ?? ''))
     .slice(0, 10)
     .map((r) => ({
