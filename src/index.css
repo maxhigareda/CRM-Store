@@ -549,6 +549,14 @@ body {
   border-bottom: none;
 }
 
+.table tbody tr.row-clickable {
+  transition: background-color 0.12s ease;
+}
+
+.table tbody tr.row-clickable:hover {
+  background-color: var(--bg-main);
+}
+
 .page-header {
   display: flex;
   justify-content: space-between;

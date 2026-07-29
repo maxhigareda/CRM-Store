@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -12,17 +12,17 @@ import {
   type TooltipItem,
 } from 'chart.js';
 import { Bar, Doughnut } from 'react-chartjs-2';
-import { Loader2, TrendingUp, TrendingDown, Scale, Receipt, Hash, Wallet } from 'lucide-react';
+import {
+  Loader2, TrendingUp, TrendingDown, Scale, Receipt, Hash, Wallet, Users,
+  Coins, AlertTriangle, CalendarClock, CalendarDays, CalendarRange,
+  Banknote, DollarSign, Globe,
+} from 'lucide-react';
 import { useNotification } from '../../../contexts/NotificationContext';
 import {
-  parseCSV,
-  computeKPIs,
-  monthlySeries,
-  byCategoria,
-  topProveedores,
-  getMonths,
+  fetchDashboard,
   formatMXN,
-  type Factura,
+  formatUSD,
+  type DashboardData,
 } from './utils';
 
 ChartJS.register(
@@ -115,60 +115,38 @@ function ChartCard({ title, children, style }: { title: string; children: React.
 // ──────────────────────────────────────────────
 export default function Dashboard() {
   const { showNotification } = useNotification();
-  const [allRows, setAllRows] = useState<Factura[]>([]);
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Filtros
+  // Filtros (se mandan como parámetros al RPC server-side)
   const [mesFilter, setMesFilter] = useState<string>('todos');
   const [tipoFilter, setTipoFilter] = useState<string>('todas');
 
+  // Cada cambio de filtro dispara una petición; Postgres agrega y devuelve el JSON.
   useEffect(() => {
-    fetch('/concentrado.csv')
-      .then((r) => {
-        if (!r.ok) throw new Error('No se pudo cargar el CSV');
-        return r.text();
-      })
-      .then((text) => {
-        const rows = parseCSV(text);
-        setAllRows(rows);
-      })
+    let cancelled = false;
+    setLoading(true);
+    fetchDashboard(mesFilter, tipoFilter)
+      .then((d) => { if (!cancelled) setData(d); })
       .catch((err) => {
-        showNotification('error', 'Error al cargar el dashboard: ' + err.message);
+        if (!cancelled) showNotification('error', 'Error al cargar el dashboard: ' + err.message);
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mesFilter, tipoFilter]);
 
-  // Meses únicos para el selector
-  const availableMonths = useMemo(() => getMonths(allRows), [allRows]);
+  // Loader de página completa solo en la primera carga (aún sin datos).
+  if (!data) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 16, color: 'var(--text-muted)' }}>
+        <Loader2 size={40} className="animate-spin" style={{ color: 'var(--primary-color)' }} />
+        <p style={{ fontSize: '1rem' }}>Cargando datos del dashboard…</p>
+      </div>
+    );
+  }
 
-  // Filas filtradas
-  const filtered = useMemo(() => {
-    let rows = allRows;
-    if (mesFilter !== 'todos') {
-      rows = rows.filter((r) => r.fecha.startsWith(mesFilter));
-    }
-    if (tipoFilter === 'emitidas') {
-      rows = rows.filter((r) => r.tipoFactura === 'EMITIDA');
-    } else if (tipoFilter === 'recibidas') {
-      rows = rows.filter((r) => r.tipoFactura === 'RECIBIDA');
-    }
-    return rows;
-  }, [allRows, mesFilter, tipoFilter]);
-
-  const kpis       = useMemo(() => computeKPIs(filtered),       [filtered]);
-  const monthly    = useMemo(() => monthlySeries(filtered),      [filtered]);
-  const categorias = useMemo(() => byCategoria(filtered),        [filtered]);
-  const proveedores = useMemo(() => topProveedores(filtered),    [filtered]);
-
-  // ── Últimas 10 facturas (sin filtrar para tabla) ──
-  const ultimasFacturas = useMemo(() =>
-    [...allRows]
-      .filter((r) => r.tipo !== 'P' && r.total > 0)
-      .sort((a, b) => b.fecha.localeCompare(a.fecha))
-      .slice(0, 10),
-    [allRows],
-  );
+  const { kpis, monthly, categorias, proveedores, ultimas: ultimasFacturas, cxc, facturacion, mesesDisponibles: availableMonths, totalRegistros } = data;
 
   // ── Datos de charts ──
   const monthlyChartData = {
@@ -218,6 +196,33 @@ export default function Dashboard() {
     }],
   };
 
+  // ── Datos de charts: Cuentas por cobrar ──
+  const cxcClienteData = {
+    labels: cxc.porCliente.map((c) => (c.cliente.length > 28 ? c.cliente.slice(0, 26) + '…' : c.cliente)),
+    datasets: [{
+      label: 'Saldo por cobrar',
+      data: cxc.porCliente.map((c) => c.saldo),
+      backgroundColor: '#f59e0bcc', borderColor: '#f59e0b', borderWidth: 1.5, borderRadius: 6,
+    }],
+  };
+  const cxcAgingData = {
+    labels: cxc.aging.map((a) => a.bucket),
+    datasets: [{
+      data: cxc.aging.map((a) => a.saldo),
+      backgroundColor: ['#16a34a', '#f59e0b', '#f97316', '#ef4444'],
+      borderWidth: 2, borderColor: '#ffffff',
+    }],
+  };
+  const cxcCobranzaData = {
+    labels: cxc.cobranza.map((c) => c.bucket),
+    datasets: [{
+      label: 'Por cobrar',
+      data: cxc.cobranza.map((c) => c.saldo),
+      backgroundColor: ['#ef4444cc', '#0070f3cc', '#06b6d4cc', '#8b5cf6cc', '#94a3b8cc'],
+      borderWidth: 1.5, borderRadius: 6,
+    }],
+  };
+
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
@@ -241,6 +246,12 @@ export default function Dashboard() {
         },
       },
     },
+  };
+
+  // Barra vertical de una sola serie (colores por barra) → sin leyenda.
+  const verticalBarSingleOptions = {
+    ...chartOptions,
+    plugins: { ...chartOptions.plugins, legend: { display: false } },
   };
 
   const doughnutOptions = {
@@ -282,25 +293,17 @@ export default function Dashboard() {
   };
 
   // ─────────────── Render ───────────────
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 16, color: 'var(--text-muted)' }}>
-        <Loader2 size={40} className="animate-spin" style={{ color: 'var(--primary-color)' }} />
-        <p style={{ fontSize: '1rem' }}>Cargando datos del dashboard…</p>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ padding: '24px', maxWidth: 1280, margin: '0 auto' }}>
+    <div style={{ padding: '24px', maxWidth: 1280, margin: '0 auto', opacity: loading ? 0.6 : 1, transition: 'opacity 0.15s' }}>
 
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: 4 }}>
+        <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
           Dashboard Financiero
+          {loading && <Loader2 size={18} className="animate-spin" style={{ color: 'var(--primary-color)' }} />}
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
-          Resumen contable de facturas CFDI · {allRows.filter(r => r.tipo !== 'P' && r.total > 0).length} facturas cargadas
+          Resumen contable de facturas CFDI · {totalRegistros.toLocaleString('es-MX')} registros
         </p>
       </div>
 
@@ -376,28 +379,36 @@ export default function Dashboard() {
           sub="Facturas recibidas"
         />
         <KpiCard
+          label="Nómina"
+          value={formatMXN(kpis.nominaTotal)}
+          icon={<Users size={18} />}
+          color="#f97316"
+          bgColor="#ffedd5"
+          sub="CFDI nómina emitida"
+        />
+        <KpiCard
           label="Balance neto"
           value={formatMXN(kpis.balance)}
           icon={<Scale size={18} />}
           color={kpis.balance >= 0 ? COLOR_INGRESOS : COLOR_GASTOS}
           bgColor={kpis.balance >= 0 ? '#dcfce7' : '#fee2e2'}
-          sub="Ingresos − Gastos"
+          sub="Ingresos − Gastos − Nómina"
         />
         <KpiCard
-          label="IVA acumulado"
+          label="IVA trasladado"
           value={formatMXN(kpis.ivaTotal)}
           icon={<Receipt size={18} />}
           color="#8b5cf6"
           bgColor="#f3e8ff"
-          sub="Total − Subtotal"
+          sub="Real (impuestos CFDI)"
         />
         <KpiCard
-          label="# Facturas"
+          label="# Facturas (ventas)"
           value={kpis.numFacturas.toString()}
           icon={<Hash size={18} />}
           color="#0070f3"
           bgColor="#dbeafe"
-          sub="Con monto > 0"
+          sub="Ingresos + Gastos tipo I"
         />
         <KpiCard
           label="Ticket promedio"
@@ -407,6 +418,189 @@ export default function Dashboard() {
           bgColor="#fef3c7"
           sub="Por factura"
         />
+      </div>
+
+      {/* ───────── Facturación por moneda / entidad ───────── */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <DollarSign size={20} style={{ color: '#16a34a' }} /> Facturación por moneda
+        </h2>
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+          Emitidas de ingreso · importes en su moneda nativa (sin conversión)
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
+        <KpiCard
+          label="Facturado MXN"
+          value={formatMXN(facturacion.mxn.total)}
+          icon={<Banknote size={18} />}
+          color="#16a34a" bgColor="#dcfce7"
+          sub={`${facturacion.mxn.num} facturas · moneda nacional`}
+        />
+        <KpiCard
+          label="Facturado USD · SA de CV"
+          value={formatUSD(facturacion.usdSaCv.total)}
+          icon={<DollarSign size={18} />}
+          color="#0070f3" bgColor="#dbeafe"
+          sub={`${facturacion.usdSaCv.num} facturas · Store Intelligence SA de CV`}
+        />
+        <KpiCard
+          label="Facturado USD · AMERICAS LLC"
+          value={formatUSD(facturacion.usdAmericas.total)}
+          icon={<Globe size={18} />}
+          color="#8b5cf6" bgColor="#f3e8ff"
+          sub={`${facturacion.usdAmericas.num} facturas · Store Intelligence Americas LLC`}
+        />
+      </div>
+
+      {/* ───────── Cuentas por Cobrar ───────── */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Coins size={20} style={{ color: '#f59e0b' }} /> Cuentas por cobrar
+        </h2>
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+          ¿Quién nos debe y cuánto entra? · snapshot actual (no depende del filtro de mes)
+        </span>
+      </div>
+
+      {/* KPIs de cobranza */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 24 }}>
+        <KpiCard
+          label="Por cobrar (total)"
+          value={formatMXN(cxc.totalPorCobrar)}
+          icon={<Coins size={18} />}
+          color="#f59e0b" bgColor="#fef3c7"
+          sub={`${cxc.numFacturasPendientes} facturas · ${cxc.numClientesDeudores} clientes`}
+        />
+        <KpiCard
+          label="Vencido"
+          value={formatMXN(cxc.vencido)}
+          icon={<AlertTriangle size={18} />}
+          color={COLOR_GASTOS} bgColor="#fee2e2"
+          sub="Ya nos lo debían"
+        />
+        <KpiCard
+          label="Vence hoy"
+          value={formatMXN(cxc.hoy)}
+          icon={<CalendarClock size={18} />}
+          color={COLOR_PRIMARY} bgColor="#dbeafe"
+          sub="HOY nos deberían pagar"
+        />
+        <KpiCard
+          label="De aquí al 15"
+          value={formatMXN(cxc.hastaDia15)}
+          icon={<CalendarDays size={18} />}
+          color="#8b5cf6" bgColor="#f3e8ff"
+          sub="Vence antes del próximo 15"
+        />
+        <KpiCard
+          label="Este mes"
+          value={formatMXN(cxc.esteMes)}
+          icon={<CalendarRange size={18} />}
+          color={COLOR_INGRESOS} bgColor="#dcfce7"
+          sub="Vence de hoy a fin de mes"
+        />
+      </div>
+
+      {/* Gráficas de cobranza */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 20, marginBottom: 20 }}>
+        <ChartCard title="Quién nos debe — top clientes">
+          <div style={{ height: Math.max(240, cxc.porCliente.length * 38) }}>
+            {cxc.porCliente.length > 0
+              ? <Bar data={cxcClienteData} options={horizontalBarOptions} />
+              : <p style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 80 }}>Nadie nos debe 🎉</p>
+            }
+          </div>
+        </ChartCard>
+
+        <ChartCard title="Antigüedad de saldos (desde emisión)">
+          <div style={{ height: 280 }}>
+            {cxc.totalPorCobrar > 0
+              ? <Doughnut data={cxcAgingData} options={doughnutOptions} />
+              : <p style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 80 }}>Sin saldos pendientes</p>
+            }
+          </div>
+        </ChartCard>
+      </div>
+
+      <div style={{ marginBottom: 20 }}>
+        <ChartCard title="Cobranza esperada por vencimiento (estimado según condiciones de pago)">
+          <div style={{ height: 280 }}>
+            {cxc.totalPorCobrar > 0
+              ? <Bar data={cxcCobranzaData} options={verticalBarSingleOptions} />
+              : <p style={{ color: 'var(--text-muted)', textAlign: 'center', paddingTop: 80 }}>Sin saldos pendientes</p>
+            }
+          </div>
+        </ChartCard>
+      </div>
+
+      {/* Tabla: facturas por cobrar */}
+      <div style={{
+        background: 'var(--bg-card)', border: '1px solid var(--border-color)',
+        borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden', marginBottom: 32,
+      }}>
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)', margin: 0 }}>
+            Facturas por cobrar — más vencidas primero
+          </h3>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc' }}>
+                {['Cliente', 'Emisión', 'Vence', 'Estatus', 'Saldo'].map((h) => (
+                  <th key={h} style={{
+                    padding: '10px 16px', textAlign: h === 'Saldo' ? 'right' : 'left', fontWeight: 700,
+                    color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase',
+                    letterSpacing: '0.05em', borderBottom: '1px solid var(--border-color)',
+                  }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {cxc.facturas.length === 0 ? (
+                <tr><td colSpan={5} style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>Sin facturas pendientes de cobro 🎉</td></tr>
+              ) : cxc.facturas.map((f, i) => {
+                const vencida = f.diasVencido > 0;
+                const estatus = f.diasVencido > 0 ? `Vencida ${f.diasVencido}d`
+                  : f.diasVencido === 0 ? 'Vence hoy'
+                  : `En ${Math.abs(f.diasVencido)}d`;
+                return (
+                  <tr key={i}
+                    style={{ borderBottom: '1px solid #f1f5f9' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <td style={{ padding: '10px 16px', color: 'var(--text-main)', fontWeight: 500, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {f.cliente}
+                    </td>
+                    <td style={{ padding: '10px 16px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{f.fecha}</td>
+                    <td style={{ padding: '10px 16px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{f.vencimiento}</td>
+                    <td style={{ padding: '10px 16px' }}>
+                      <span style={{
+                        display: 'inline-block', padding: '2px 10px', borderRadius: 999, fontSize: '0.75rem', fontWeight: 700,
+                        background: vencida ? '#fee2e2' : f.diasVencido === 0 ? '#dbeafe' : '#f1f5f9',
+                        color: vencida ? '#991b1b' : f.diasVencido === 0 ? '#1e40af' : '#475569',
+                      }}>
+                        {estatus}
+                      </span>
+                      {f.estado === 'parcial' && (
+                        <span style={{ marginLeft: 6, fontSize: '0.7rem', color: '#9a3412' }}>parcial</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '10px 16px', fontWeight: 700, color: 'var(--text-main)', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                      {formatMXN(f.saldo)}
+                      {f.moneda !== 'MXN' && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 4 }}>({f.moneda})</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Gráficas — fila 1 */}
@@ -459,7 +653,7 @@ export default function Dashboard() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
             <thead>
               <tr style={{ background: '#f8fafc' }}>
-                {['Fecha', 'Emisor', 'Categoría', 'Total', 'Tipo'].map((h) => (
+                {['Fecha', 'Cliente / Proveedor', 'Categoría', 'Total', 'Tipo'].map((h) => (
                   <th key={h} style={{
                     padding: '10px 16px', textAlign: 'left', fontWeight: 700,
                     color: 'var(--text-muted)', fontSize: '0.75rem', textTransform: 'uppercase',
@@ -473,7 +667,7 @@ export default function Dashboard() {
             <tbody>
               {ultimasFacturas.map((f, i) => (
                 <tr
-                  key={f.uuid || i}
+                  key={i}
                   style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.15s' }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = '#f8fafc')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
@@ -482,7 +676,10 @@ export default function Dashboard() {
                     {f.fecha.slice(0, 10)}
                   </td>
                   <td style={{ padding: '10px 16px', color: 'var(--text-main)', fontWeight: 500, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {f.emisor || f.rfcEmisor}
+                    {f.tipoFactura === 'EMITIDA' 
+                      ? (f.receptor || f.rfcReceptor || '—') 
+                      : (f.emisor || f.rfcEmisor || '—')
+                    }
                   </td>
                   <td style={{ padding: '10px 16px', color: 'var(--text-muted)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {f.categoria || '—'}

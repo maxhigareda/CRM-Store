@@ -10,6 +10,7 @@ export interface UserProfile {
   area_id?: string;
   photo_url?: string;
   modules?: string[];
+  can_edit_facturas?: boolean;
 }
 
 interface AuthContextType {
@@ -132,10 +133,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setLoading(false);
           clearTimeout(fallbackTimer);
 
-          // Escuchar cambios de auth sólo tras inicializar la sesión inicial
-          const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+          // Escuchar cambios de auth sólo tras inicializar la sesión inicial.
+          //
+          // IMPORTANTE: este callback NO debe hacer `await` de llamadas a Supabase
+          // (getSession, .from(), etc.). El callback corre con el lock de auth
+          // tomado; una query que espera el token se queda esperando ESE MISMO lock
+          // → DEADLOCK: la app queda navegable pero NINGUNA query de Supabase
+          // resuelve hasta recargar (cmd+R). Por eso el callback es síncrono y el
+          // fetchProfile se difiere FUERA del lock con setTimeout(…, 0).
+          const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
             console.log("onAuthStateChange disparado:", event, newSession ? "Con sesión" : "Sin sesión");
-            
+
             if (event === 'PASSWORD_RECOVERY') {
               console.log("Redireccionando a /reset-password por PASSWORD_RECOVERY");
               if (mounted) {
@@ -150,18 +158,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             if (event === 'INITIAL_SESSION') return;
-            
+
             if (!mounted) return;
 
             setSession(newSession);
             setUser(newSession?.user ?? null);
-            
+            setLoading(false);
+
+            // Trabajo de DB FUERA del callback (evita el deadlock del lock de auth).
             if (newSession?.user) {
-              await fetchProfile(newSession.user.id);
+              const uid = newSession.user.id;
+              setTimeout(() => { if (mounted) fetchProfile(uid); }, 0);
             } else {
               setProfile(null);
             }
-            setLoading(false);
           });
 
           authSubscription = subscription;

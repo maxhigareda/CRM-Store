@@ -13,8 +13,11 @@ import Admin from './pages/Admin';
 import Clients from './pages/Clients';
 import Tags from './pages/Tags';
 import Home from './pages/Home';
-import Facturas from './pages/Financiero/Facturas';
 import Dashboard from './pages/Financiero/Dashboard';
+import FacturasTabla from './pages/Financiero/Tablas/Facturas';
+import Conciliacion from './pages/Financiero/Conciliacion';
+import CuentasPorCobrar from './pages/Financiero/CuentasPorCobrar';
+import MovimientosBancariosTabla from './pages/Financiero/Tablas/MovimientosBancarios';
 
 function App() {
   return (
@@ -40,7 +43,10 @@ function App() {
             <Route path="financiero" element={<FinancieroLayout />}>
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
-              <Route path="facturas" element={<Facturas />} />
+              <Route path="conciliacion" element={<Conciliacion />} />
+              <Route path="cuentas-por-cobrar" element={<CuentasPorCobrar />} />
+              <Route path="tablas/facturas" element={<FacturasTabla />} />
+              <Route path="tablas/movimientos" element={<MovimientosBancariosTabla />} />
               <Route path="clients" element={<Clients />} />
               <Route path="admin" element={<Admin />} />
             </Route>
