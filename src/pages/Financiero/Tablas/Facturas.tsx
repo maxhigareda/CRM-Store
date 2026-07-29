@@ -171,7 +171,7 @@ export default function FacturasTabla() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch]           = useState('');
   const [tipoFilter, setTipoFilter]   = useState<'' | 'EMITIDA' | 'RECIBIDA'>('');
-  const [tipoCfdiFilter, setTipoCfdiFilter] = useState('');
+  const [tipoCfdiFilter, setTipoCfdiFilter] = useState('I');
   const [monedaFilter, setMonedaFilter]     = useState('');
   const [emisorFilter, setEmisorFilter]     = useState('');
   const [receptorFilter, setReceptorFilter] = useState('');

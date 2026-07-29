@@ -120,7 +120,7 @@ export default function Dashboard() {
 
   // Filtros (se mandan como parámetros al RPC server-side)
   const [mesFilter, setMesFilter] = useState<string>('todos');
-  const [tipoFilter, setTipoFilter] = useState<string>('emitidas');
+  const [tipoFilter, setTipoFilter] = useState<string>('todas');
 
   // Cada cambio de filtro dispara una petición; Postgres agrega y devuelve el JSON.
   useEffect(() => {
