@@ -193,7 +193,7 @@ export default function FacturasTabla() {
 
   // ── Categorias (labels) + clasificacion masiva ──
   const [categorias, setCategorias]   = useState<Categoria[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectedInvoices, setSelectedInvoices] = useState<Map<number, Factura>>(new Map());
   const [bulkCategoria, setBulkCategoria] = useState('');
   const [applyingBulk, setApplyingBulk]   = useState(false);
 
@@ -323,27 +323,27 @@ export default function FacturasTabla() {
   };
 
   // ── Seleccion de filas (para clasificacion masiva) ──
-  const toggleRow = (id: number) => setSelectedIds((prev) => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
+  const toggleRow = (row: Factura) => setSelectedInvoices((prev) => {
+    const next = new Map(prev);
+    next.has(row.id) ? next.delete(row.id) : next.set(row.id, row);
     return next;
   });
   const pageIds = rows.map((r) => r.id as number);
-  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
-  const toggleAllPage = () => setSelectedIds((prev) => {
-    const next = new Set(prev);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedInvoices.has(id));
+  const toggleAllPage = () => setSelectedInvoices((prev) => {
+    const next = new Map(prev);
     if (allPageSelected) pageIds.forEach((id) => next.delete(id));
-    else pageIds.forEach((id) => next.add(id));
+    else rows.forEach((r) => next.set(r.id, r));
     return next;
   });
-  const clearSelection = () => setSelectedIds(new Set());
+  const clearSelection = () => setSelectedInvoices(new Map());
 
   // Aplica una categoria (o la quita si viene null) a todas las filas seleccionadas.
   const applyBulkCategoria = async (categoria: string | null) => {
     if (!canEdit) return;
-    if (selectedIds.size === 0) return;
+    if (selectedInvoices.size === 0) return;
     setApplyingBulk(true);
-    const ids = [...selectedIds];
+    const ids = [...selectedInvoices.keys()];
     const { error } = await supabase.from('facturas').update({ categoria }).in('id', ids);
     setApplyingBulk(false);
     if (error) { showNotification('error', 'No se pudo clasificar: ' + error.message); return; }
@@ -351,7 +351,7 @@ export default function FacturasTabla() {
       categoria
         ? `${ids.length} factura(s) clasificadas como "${categoria}".`
         : `Categoría removida de ${ids.length} factura(s).`);
-    setRows((prev) => prev.map((r) => (selectedIds.has(r.id) ? { ...r, categoria } : r)));
+    setRows((prev) => prev.map((r) => (selectedInvoices.has(r.id) ? { ...r, categoria } : r)));
     clearSelection();
     setBulkCategoria('');
   };
@@ -404,7 +404,7 @@ export default function FacturasTabla() {
     showNotification('success', 'Factura eliminada permanentemente.');
     setRows((prev) => prev.filter((r) => r.id !== confirmDelete.id));
     setTotal((t) => Math.max(0, t - 1));
-    setSelectedIds((prev) => { const n = new Set(prev); n.delete(confirmDelete.id); return n; });
+    setSelectedInvoices((prev) => { const n = new Map(prev); n.delete(confirmDelete.id); return n; });
     setConfirmDelete(null);
     setEditing(null); setForm({});
   };
@@ -509,6 +509,13 @@ export default function FacturasTabla() {
       setIsUploading(false);
     }
   };
+
+  const selectedCount = selectedInvoices.size;
+  const selectedTotalsByCurrency = [...selectedInvoices.values()].reduce((acc: Record<string, number>, f) => {
+    const currency = f.moneda || 'MXN';
+    acc[currency] = (acc[currency] || 0) + (Number(f.total) || 0);
+    return acc;
+  }, {});
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
@@ -623,14 +630,14 @@ export default function FacturasTabla() {
       )}
 
       {/* Barra de clasificación masiva */}
-      {canEdit && selectedIds.size > 0 && (
+      {canEdit && selectedInvoices.size > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
           marginBottom: '12px', padding: '12px 16px', background: '#eff6ff',
           border: '1px solid #bfdbfe', borderRadius: '12px', animation: 'fadeIn 0.2s ease',
         }}>
           <span style={{ fontWeight: 700, color: '#1e40af', fontSize: '0.9rem' }}>
-            {selectedIds.size} seleccionada{selectedIds.size !== 1 ? 's' : ''}
+            {selectedInvoices.size} seleccionada{selectedInvoices.size !== 1 ? 's' : ''}
           </span>
           <span style={{ color: '#93c5fd' }}>·</span>
           <span style={{ fontSize: '0.85rem', color: '#334155' }}>Clasificar como</span>
@@ -775,8 +782,8 @@ export default function FacturasTabla() {
                       <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
-                          checked={selectedIds.has(row.id)}
-                          onChange={() => toggleRow(row.id)}
+                          checked={selectedInvoices.has(row.id)}
+                          onChange={() => toggleRow(row)}
                           style={{ cursor: 'pointer', width: '16px', height: '16px' }}
                         />
                       </td>
@@ -815,6 +822,33 @@ export default function FacturasTabla() {
             </tbody>
           </table>
         </div>
+        {/* Resumen de selección al fondo de la tabla */}
+        {selectedCount > 0 && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 24px',
+            background: '#eff6ff',
+            borderTop: '1px solid var(--border-color)',
+            fontSize: '0.9rem',
+            color: '#1e40af',
+            animation: 'fadeIn 0.2s ease',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontWeight: 700 }}>
+                Conteo: {selectedCount} factura{selectedCount !== 1 ? 's' : ''} seleccionada{selectedCount !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <div style={{ fontWeight: 800 }}>
+              Suma Total: {Object.entries(selectedTotalsByCurrency).map(([currency, sum], idx) => (
+                <span key={currency} style={{ marginLeft: idx > 0 ? '16px' : '0' }}>
+                  {fmtMoney(sum, currency)}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Paginación */}
