@@ -50,6 +50,9 @@ export default function LeadTeamMeetings() {
   const [saving, setSaving] = useState(false);
   const [geminiKey, setGeminiKey] = useState(localStorage.getItem('crm_gemini_api_key') || '');
   const [geminiModel, setGeminiModel] = useState(localStorage.getItem('crm_gemini_model') || 'gemini-1.5-flash');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelLoadError, setModelLoadError] = useState<string | null>(null);
 
   // Active / Selected Meeting Details
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
@@ -125,6 +128,41 @@ export default function LeadTeamMeetings() {
     }
     setShowTranscript(false);
   }, [selectedMeeting, projects, collaborators, areas]);
+
+  const fetchAvailableModels = async (key: string) => {
+    if (!key) return;
+    setLoadingModels(true);
+    setModelLoadError(null);
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${key}`);
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => null);
+        const errMsg = errBody?.error?.message || response.statusText || `Código ${response.status}`;
+        throw new Error(errMsg);
+      }
+      const data = await response.json();
+      const list = (data.models || [])
+        .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+        .map((m: any) => m.name.replace('models/', ''));
+      setAvailableModels(list);
+      
+      // Auto-select first one if current model is not in the fetched list
+      if (list.length > 0 && !list.includes(geminiModel)) {
+        setGeminiModel(list[0]);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setModelLoadError(err.message);
+    } finally {
+      setLoadingModels(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showConfigModal && geminiKey) {
+      fetchAvailableModels(geminiKey);
+    }
+  }, [showConfigModal]);
 
   const handleSaveConfig = () => {
     localStorage.setItem('crm_gemini_api_key', geminiKey);
@@ -673,13 +711,25 @@ Aquí está la transcripción de la junta:
 
               <div className="form-group">
                 <label>Gemini API Key</label>
-                <input
-                  type="password"
-                  className="form-input"
-                  placeholder="AIzaSy..."
-                  value={geminiKey}
-                  onChange={(e) => setGeminiKey(e.target.value)}
-                />
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="password"
+                    className="form-input"
+                    placeholder="AIzaSy..."
+                    value={geminiKey}
+                    onChange={(e) => setGeminiKey(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fetchAvailableModels(geminiKey)}
+                    disabled={loadingModels || !geminiKey}
+                    className="btn btn-secondary"
+                    style={{ padding: '8px 12px', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                  >
+                    {loadingModels ? <Loader2 size={14} className="animate-spin" /> : 'Verificar Key'}
+                  </button>
+                </div>
                 <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', display: 'block' }}>
                   Puedes conseguir una clave gratuita en Google AI Studio.
                 </span>
@@ -687,15 +737,34 @@ Aquí está la transcripción de la junta:
 
               <div className="form-group" style={{ marginTop: '16px' }}>
                 <label>Modelo de IA</label>
+                {loadingModels && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: '#64748b', marginBottom: '6px' }}>
+                    <Loader2 size={12} className="animate-spin" /> Cargando modelos disponibles...
+                  </div>
+                )}
+                {modelLoadError && (
+                  <div style={{ fontSize: '0.75rem', color: '#ef4444', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <AlertTriangle size={12} /> {modelLoadError}. Usando lista predeterminada.
+                  </div>
+                )}
                 <select
                   className="form-input"
                   value={geminiModel}
                   onChange={(e) => setGeminiModel(e.target.value)}
                   style={{ width: '100%', padding: '8px 12px', fontSize: '0.875rem', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'white' }}
                 >
-                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Recomendado - Rápido)</option>
-                  <option value="gemini-1.5-pro">Gemini 1.5 Pro (Más Inteligente)</option>
-                  <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash Experimental</option>
+                  {availableModels.length > 0 ? (
+                    availableModels.map(modelId => (
+                      <option key={modelId} value={modelId}>{modelId}</option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="gemini-1.5-flash">gemini-1.5-flash (Recomendado - Rápido)</option>
+                      <option value="gemini-1.5-pro">gemini-1.5-pro (Más Inteligente)</option>
+                      <option value="gemini-2.0-flash-exp">gemini-2.0-flash-exp (Experimental)</option>
+                      <option value="gemini-1.0-pro">gemini-1.0-pro (Legacy)</option>
+                    </>
+                  )}
                 </select>
               </div>
             </div>
