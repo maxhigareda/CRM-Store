@@ -49,6 +49,7 @@ export default function LeadTeamMeetings() {
   const [transcript, setTranscript] = useState('');
   const [saving, setSaving] = useState(false);
   const [geminiKey, setGeminiKey] = useState(localStorage.getItem('crm_gemini_api_key') || '');
+  const [geminiModel, setGeminiModel] = useState(localStorage.getItem('crm_gemini_model') || 'gemini-1.5-flash');
 
   // Active / Selected Meeting Details
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
@@ -127,7 +128,8 @@ export default function LeadTeamMeetings() {
 
   const handleSaveConfig = () => {
     localStorage.setItem('crm_gemini_api_key', geminiKey);
-    showNotification('success', 'Clave de Gemini guardada correctamente.');
+    localStorage.setItem('crm_gemini_model', geminiModel);
+    showNotification('success', 'Configuración de IA guardada correctamente.');
     setShowConfigModal(false);
   };
 
@@ -216,7 +218,7 @@ Aquí está la transcripción de la junta:
 "${selectedMeeting.transcript}"`;
 
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1/models/${geminiModel}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -681,6 +683,20 @@ Aquí está la transcripción de la junta:
                 <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', display: 'block' }}>
                   Puedes conseguir una clave gratuita en Google AI Studio.
                 </span>
+              </div>
+
+              <div className="form-group" style={{ marginTop: '16px' }}>
+                <label>Modelo de IA</label>
+                <select
+                  className="form-input"
+                  value={geminiModel}
+                  onChange={(e) => setGeminiModel(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', fontSize: '0.875rem', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'white' }}
+                >
+                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Recomendado - Rápido)</option>
+                  <option value="gemini-1.5-pro">Gemini 1.5 Pro (Más Inteligente)</option>
+                  <option value="gemini-2.0-flash-exp">Gemini 2.0 Flash Experimental</option>
+                </select>
               </div>
             </div>
 
