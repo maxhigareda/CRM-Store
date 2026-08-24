@@ -228,7 +228,9 @@ Aquí está la transcripción de la junta:
       );
 
       if (!response.ok) {
-        throw new Error(`API Gemini respondió con error: ${response.statusText}`);
+        const errBody = await response.json().catch(() => null);
+        const errMsg = errBody?.error?.message || response.statusText || `Código de respuesta ${response.status}`;
+        throw new Error(errMsg);
       }
 
       const resData = await response.json();
