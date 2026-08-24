@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Calendar, ClipboardList, CheckCircle2, AlertCircle, Trash2,
-  Loader2, Plus, FileText, Sparkles, Settings, ArrowRight,
-  ChevronDown, ChevronUp, AlertTriangle
+  Loader2, Plus, FileText, Sparkles, Settings,
+  ChevronDown, ChevronUp, AlertTriangle, Users, 
+  Layers, Check, HelpCircle, Network
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -27,19 +28,53 @@ interface ExtractedTask {
   project_name: string | null;
   // Local states for UI editing before saving
   selectedProjectId?: string;
-  selectedAssigneeId?: string;
   status?: 'pending' | 'saved' | 'error';
 }
+
+interface LeadTeamTask {
+  id: string;
+  meeting_id: string | null;
+  title: string;
+  description: string | null;
+  role: string;
+  project_id: string | null;
+  status: string; // 'En Cola' | 'En Curso' | 'Completada'
+  model: string | null;
+  due_time: string | null;
+  created_at: string;
+}
+
+const ROLES = [
+  'Office Manager',
+  'Development Manager',
+  'BI Manager',
+  'Business Manager',
+  'PMP',
+  'Low Code Manager'
+];
+
+const ROLE_FOCUS: Record<string, string> = {
+  'CEO': 'Capa de Mando - Visión estratégica y dirección ejecutiva global.',
+  'Office Manager': 'Capa de Operación - Agenda, compras y recursos generales.',
+  'Development Manager': 'Sistema de Desarrollo - Administración técnica, código y arquitectura.',
+  'BI Manager': 'Capa de Datos - Reportería, analítica y tableros BI.',
+  'Business Manager': 'Operación Comercial - Facturación, cuentas por cobrar/pagar y contratos.',
+  'PMP': 'Gestión de Proyectos - Control de tiempos, metodologías y entregas.',
+  'Low Code Manager': 'Soluciones Internas - Automatizaciones y herramientas ágiles.'
+};
 
 export default function LeadTeamMeetings() {
   const { showNotification } = useNotification();
 
   // ── States ──
+  const [activeTab, setActiveTab] = useState<'equipo' | 'tareas' | 'boveda' | 'juntas'>('equipo');
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [leadTeamTasks, setLeadTeamTasks] = useState<LeadTeamTask[]>([]);
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
-  const [collaborators, setCollaborators] = useState<{ id: string; full_name: string; email: string; area_id: string | null }[]>([]);
-  const [areas, setAreas] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Active Role Filter in Tareas Tab
+  const [activeRoleFilter, setActiveRoleFilter] = useState<string>('TODOS');
 
   // Modals / Form
   const [showFormModal, setShowFormModal] = useState(false);
@@ -54,71 +89,68 @@ export default function LeadTeamMeetings() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelLoadError, setModelLoadError] = useState<string | null>(null);
 
-  // Active / Selected Meeting Details
+  // Active / Selected Meeting Details (Pestaña Juntas)
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [extractedTasks, setExtractedTasks] = useState<ExtractedTask[]>([]);
   const [showTranscript, setShowTranscript] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Meeting | null>(null);
-  const [deleting, setDeleting] = useState(false);
+
+  // Bóveda de Conocimiento Selected Node Details
+  const [selectedNode, setSelectedNode] = useState<{
+    id: string;
+    type: 'meeting' | 'decision' | 'task' | 'project';
+    label: string;
+    description?: string;
+    metadata?: Record<string, any>;
+  } | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
   // Load Initial Data
   useEffect(() => {
-    fetchMeetings();
-    fetchMetadata();
+    fetchInitialData();
   }, []);
 
-  const fetchMeetings = async () => {
+  const fetchInitialData = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('lead_team_meetings')
-      .select('*')
-      .order('date', { ascending: false });
+    try {
+      const [meetingsRes, tasksRes, projectsRes] = await Promise.all([
+        supabase.from('lead_team_meetings').select('*').order('date', { ascending: false }),
+        supabase.from('lead_team_tasks').select('*').order('created_at', { ascending: false }),
+        supabase.from('projects').select('id, name')
+      ]);
 
-    if (error) {
-      showNotification('error', 'Error al cargar reuniones: ' + error.message);
-    } else {
-      setMeetings(data || []);
-      if (data && data.length > 0 && !selectedMeeting) {
-        setSelectedMeeting(data[0]);
+      if (meetingsRes.error) throw meetingsRes.error;
+      if (tasksRes.error) throw tasksRes.error;
+      if (projectsRes.error) throw projectsRes.error;
+
+      setMeetings(meetingsRes.data || []);
+      setLeadTeamTasks(tasksRes.data || []);
+      setProjects(projectsRes.data || []);
+
+      if (meetingsRes.data && meetingsRes.data.length > 0 && !selectedMeeting) {
+        setSelectedMeeting(meetingsRes.data[0]);
       }
+    } catch (err: any) {
+      showNotification('error', 'Error al cargar datos: ' + err.message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  const fetchMetadata = async () => {
-    const [projRes, collRes, areaRes] = await Promise.all([
-      supabase.from('projects').select('id, name'),
-      supabase.from('profiles').select('id, full_name, email, area_id'),
-      supabase.from('areas').select('id, name')
-    ]);
-
-    if (projRes.data) setProjects(projRes.data);
-    if (collRes.data) setCollaborators(collRes.data);
-    if (areaRes.data) setAreas(areaRes.data);
-  };
-
-  // Sync state when selected meeting changes
+  // Sync state when selected meeting changes (Analítica tab)
   useEffect(() => {
     if (selectedMeeting && selectedMeeting.summary && selectedMeeting.summary.tareas) {
-      // Map extracted tasks with pre-selected projects and assignees based on metadata
       const mapped = (selectedMeeting.summary.tareas || []).map(task => {
         // Find project by name match
         const project = projects.find(p => 
           p.name.toLowerCase().includes((task.project_name || '').toLowerCase()) ||
           (task.project_name || '').toLowerCase().includes(p.name.toLowerCase())
         );
-        
-        // Find area matching the assigned role
-        const area = areas.find(a => a.name.toLowerCase() === task.role.toLowerCase());
-        
-        // Pre-select collaborator from that area
-        const assignee = collaborators.find(c => c.area_id === area?.id);
 
         return {
           ...task,
           selectedProjectId: project?.id || '',
-          selectedAssigneeId: assignee?.id || '',
           status: task.status || 'pending' as const
         };
       });
@@ -127,7 +159,7 @@ export default function LeadTeamMeetings() {
       setExtractedTasks([]);
     }
     setShowTranscript(false);
-  }, [selectedMeeting, projects, collaborators, areas]);
+  }, [selectedMeeting, projects]);
 
   const fetchAvailableModels = async (key: string) => {
     if (!key) return;
@@ -146,7 +178,6 @@ export default function LeadTeamMeetings() {
         .map((m: any) => m.name.replace('models/', ''));
       setAvailableModels(list);
       
-      // Auto-select first one if current model is not in the fetched list
       if (list.length > 0 && !list.includes(geminiModel)) {
         setGeminiModel(list[0]);
       }
@@ -176,45 +207,51 @@ export default function LeadTeamMeetings() {
     if (!title || !date) return;
     setSaving(true);
 
-    const { data, error } = await supabase
-      .from('lead_team_meetings')
-      .insert({ title, date, transcript, summary: {} })
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('lead_team_meetings')
+        .insert({ title, date, transcript, summary: {} })
+        .select()
+        .single();
 
-    setSaving(false);
-    if (error) {
-      showNotification('error', 'Error al guardar la reunión: ' + error.message);
-      return;
+      if (error) throw error;
+
+      showNotification('success', 'Reunión guardada correctamente.');
+      setShowFormModal(false);
+      setTitle('');
+      setTranscript('');
+      setMeetings(prev => [data, ...prev]);
+      setSelectedMeeting(data);
+      setActiveTab('juntas');
+    } catch (err: any) {
+      showNotification('error', 'Error al guardar reunión: ' + err.message);
+    } finally {
+      setSaving(false);
     }
-
-    showNotification('success', 'Reunión guardada correctamente.');
-    setShowFormModal(false);
-    setTitle('');
-    setTranscript('');
-    setMeetings(prev => [data, ...prev]);
-    setSelectedMeeting(data);
   };
 
   const handleDeleteMeeting = async () => {
     if (!confirmDelete) return;
-    setDeleting(true);
 
-    const { error } = await supabase
-      .from('lead_team_meetings')
-      .delete()
-      .eq('id', confirmDelete.id);
+    try {
+      const { error } = await supabase
+        .from('lead_team_meetings')
+        .delete()
+        .eq('id', confirmDelete.id);
 
-    setDeleting(false);
-    if (error) {
-      showNotification('error', 'Error al eliminar reunión: ' + error.message);
-    } else {
+      if (error) throw error;
+
       showNotification('success', 'Reunión eliminada correctamente.');
       setMeetings(prev => prev.filter(m => m.id !== confirmDelete.id));
       if (selectedMeeting?.id === confirmDelete.id) {
         setSelectedMeeting(null);
       }
       setConfirmDelete(null);
+      // Refresh tasks in case CASCADE wasn't setup or we want to stay in sync
+      const { data: updatedTasks } = await supabase.from('lead_team_tasks').select('*').order('created_at', { ascending: false });
+      if (updatedTasks) setLeadTeamTasks(updatedTasks);
+    } catch (err: any) {
+      showNotification('error', 'Error al eliminar reunión: ' + err.message);
     }
   };
 
@@ -233,7 +270,7 @@ export default function LeadTeamMeetings() {
       const prompt = `Analiza la siguiente transcripción de una reunión de equipo ("Lead Team").
 Identifica:
 1. Decisiones principales tomadas (en forma de lista de strings).
-2. Tareas acordadas. Para cada tarea, debes extraer:
+2. Tareas de alto nivel acordadas para los líderes. Para cada tarea, debes extraer:
    - Título de la tarea (corto, descriptivo).
    - Descripción detallada (qué se acordó).
    - Puesto responsable. Debe ser EXACTAMENTE uno de estos 7 puestos: "CEO", "Office Manager", "Development Manager", "BI Manager", "Business Manager", "PMP", "Low Code Manager".
@@ -279,10 +316,8 @@ Aquí está la transcripción de la junta:
         throw new Error('No se recibió análisis de Gemini');
       }
 
-      // Parse JSON from Gemini
       const parsed = JSON.parse(text.trim());
       
-      // Update Database
       const { error } = await supabase
         .from('lead_team_meetings')
         .update({ summary: parsed })
@@ -290,7 +325,6 @@ Aquí está la transcripción de la junta:
 
       if (error) throw error;
 
-      // Update State
       const updatedMeeting = { ...selectedMeeting, summary: parsed };
       setSelectedMeeting(updatedMeeting);
       setMeetings(prev => prev.map(m => m.id === selectedMeeting.id ? updatedMeeting : m));
@@ -303,35 +337,40 @@ Aquí está la transcripción de la junta:
     }
   };
 
-  // ── Sync to projects/tasks table ──
-  const handleSyncTask = async (index: number) => {
+  // ── Save/Import Suggested Task to Lead Team Tasks Queue ──
+  const handleImportSuggestedTask = async (index: number) => {
     const task = extractedTasks[index];
-    if (!task.selectedProjectId) {
-      showNotification('info', 'Debes seleccionar un proyecto para sincronizar la tarea.');
-      return;
-    }
+    
+    // Set status to loading
+    setExtractedTasks(prev => prev.map((t, idx) => idx === index ? { ...t, status: 'pending' as const } : t));
 
-    // Update status to loading
-    setExtractedTasks(prev => prev.map((t, idx) => idx === index ? { ...t, status: 'saved' as const } : t));
+    try {
+      const payload = {
+        meeting_id: selectedMeeting?.id || null,
+        title: task.title,
+        description: task.description,
+        role: task.role,
+        project_id: task.selectedProjectId || null,
+        status: 'En Cola',
+        model: geminiModel,
+        due_time: '09:00:00'
+      };
 
-    const payload = {
-      project_id: task.selectedProjectId,
-      title: task.title,
-      description: `${task.description}\n\n[Asignado a: ${task.role} en Junta Lead Team]`,
-      status: 'todo',
-      priority: 'medium',
-      assigned_to: task.selectedAssigneeId || null
-    };
+      const { data, error } = await supabase
+        .from('lead_team_tasks')
+        .insert(payload)
+        .select()
+        .single();
 
-    const { error } = await supabase.from('tasks').insert(payload);
+      if (error) throw error;
 
-    if (error) {
-      showNotification('error', `Error al crear tarea "${task.title}": ` + error.message);
-      setExtractedTasks(prev => prev.map((t, idx) => idx === index ? { ...t, status: 'error' as const } : t));
-    } else {
-      showNotification('success', `Tarea "${task.title}" agregada al proyecto.`);
+      showNotification('success', `Tarea "${task.title}" importada a la cola.`);
       
-      // Update persistent summary state in meeting
+      // Update local task state
+      setExtractedTasks(prev => prev.map((t, idx) => idx === index ? { ...t, status: 'saved' as const } : t));
+      setLeadTeamTasks(prev => [data, ...prev]);
+
+      // Update persistent status in meeting summary
       if (selectedMeeting && selectedMeeting.summary) {
         const updatedTareas = [...(selectedMeeting.summary.tareas || [])];
         updatedTareas[index] = { ...updatedTareas[index], status: 'saved' };
@@ -344,20 +383,298 @@ Aquí está la transcripción de la junta:
 
         setMeetings(prev => prev.map(m => m.id === selectedMeeting.id ? { ...m, summary: updatedSummary } : m));
       }
+    } catch (err: any) {
+      showNotification('error', `Error al importar tarea: ` + err.message);
+      setExtractedTasks(prev => prev.map((t, idx) => idx === index ? { ...t, status: 'error' as const } : t));
+    }
+  };
+
+  const handleImportAllSuggestedTasks = async () => {
+    const unsavedIndices = extractedTasks
+      .map((t, idx) => t.status !== 'saved' ? idx : -1)
+      .filter(idx => idx !== -1);
+
+    if (unsavedIndices.length === 0) {
+      showNotification('info', 'No hay nuevas tareas sugeridas para importar.');
+      return;
+    }
+
+    showNotification('info', `Importando ${unsavedIndices.length} tareas...`);
+    for (const idx of unsavedIndices) {
+      await handleImportSuggestedTask(idx);
+    }
+  };
+
+  // ── Update Task Status Directly ──
+  const handleUpdateTaskStatus = async (taskId: string, newStatus: string) => {
+    try {
+      const { error } = await supabase
+        .from('lead_team_tasks')
+        .update({ status: newStatus })
+        .eq('id', taskId);
+
+      if (error) throw error;
+
+      showNotification('success', 'Estado de tarea actualizado.');
+      setLeadTeamTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+    } catch (err: any) {
+      showNotification('error', 'Error al actualizar estado: ' + err.message);
+    }
+  };
+
+  // ── Update Task Project Directly ──
+  const handleUpdateTaskProject = async (taskId: string, newProjectId: string | null) => {
+    try {
+      const { error } = await supabase
+        .from('lead_team_tasks')
+        .update({ project_id: newProjectId })
+        .eq('id', taskId);
+
+      if (error) throw error;
+
+      showNotification('success', 'Proyecto vinculado actualizado.');
+      setLeadTeamTasks(prev => prev.map(t => t.id === taskId ? { ...t, project_id: newProjectId } : t));
+    } catch (err: any) {
+      showNotification('error', 'Error al vincular proyecto: ' + err.message);
+    }
+  };
+
+  // ── Delete Task Directly ──
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      const { error } = await supabase
+        .from('lead_team_tasks')
+        .delete()
+        .eq('id', taskId);
+
+      if (error) throw error;
+
+      showNotification('success', 'Tarea eliminada de la cola.');
+      setLeadTeamTasks(prev => prev.filter(t => t.id !== taskId));
+    } catch (err: any) {
+      showNotification('error', 'Error al eliminar tarea: ' + err.message);
+    }
+  };
+
+  // ── Computed Statistics for Capa de Mando (CEO) ──
+  const teamStats = useMemo(() => {
+    const completedTasks = leadTeamTasks.filter(t => t.status === 'Completada').length;
+    const activeTasks = leadTeamTasks.filter(t => t.status === 'En Curso').length;
+    const queuedTasks = leadTeamTasks.filter(t => t.status === 'En Cola').length;
+
+    // Calculate database memory/total records roughly for high-level CEO view
+    const databaseMemory = meetings.length + leadTeamTasks.length + projects.length + 7;
+
+    return {
+      decisiones: completedTasks,
+      memoria: databaseMemory,
+      repartidas: activeTasks + queuedTasks
+    };
+  }, [meetings, leadTeamTasks, projects]);
+
+  // ── Active Tasks per Role calculation ──
+  const roleWorkload = useMemo(() => {
+    const workload: Record<string, { queue: number; inProgress: number; completed: number; total: number }> = {};
+    
+    ['CEO', ...ROLES].forEach(r => {
+      workload[r] = { queue: 0, inProgress: 0, completed: 0, total: 0 };
+    });
+
+    leadTeamTasks.forEach(t => {
+      const role = t.role;
+      if (workload[role]) {
+        workload[role].total += 1;
+        if (t.status === 'En Cola') workload[role].queue += 1;
+        else if (t.status === 'En Curso') workload[role].inProgress += 1;
+        else if (t.status === 'Completada') workload[role].completed += 1;
+      }
+    });
+
+    return workload;
+  }, [leadTeamTasks]);
+
+  // ── Filtered Tasks for Tab 2 ──
+  const filteredTasks = useMemo(() => {
+    if (activeRoleFilter === 'TODOS') return leadTeamTasks;
+    return leadTeamTasks.filter(t => t.role.toUpperCase() === activeRoleFilter.toUpperCase());
+  }, [leadTeamTasks, activeRoleFilter]);
+
+  // ── Dynamic Node Graph Data for Bóveda de Conocimiento ──
+  const graphData = useMemo(() => {
+    const nodes: Array<{ id: string; type: 'meeting' | 'decision' | 'task' | 'project'; label: string; x: number; y: number; originalObj: any }> = [];
+    const links: Array<{ source: string; target: string; id: string }> = [];
+
+    // Limit to last 4 meetings to keep the graph readable and clean
+    const recentMeetings = meetings.slice(0, 4);
+    const recentMeetingsIds = new Set(recentMeetings.map(m => m.id));
+
+    // Filter tasks related to these meetings
+    const relatedTasks = leadTeamTasks.filter(t => t.meeting_id && recentMeetingsIds.has(t.meeting_id)).slice(0, 8);
+
+    // Extract projects linked to these tasks
+    const projectIds = new Set<string>();
+    relatedTasks.forEach(t => {
+      if (t.project_id) projectIds.add(t.project_id);
+    });
+    const relatedProjects = projects.filter(p => projectIds.has(p.id));
+
+    // Get decisions from recent meetings
+    const relatedDecisions: Array<{ id: string; title: string; meetingId: string }> = [];
+    recentMeetings.forEach(m => {
+      if (m.summary?.decisiones) {
+        m.summary.decisiones.slice(0, 2).forEach((d, idx) => {
+          relatedDecisions.push({
+            id: `dec-${m.id}-${idx}`,
+            title: d,
+            meetingId: m.id
+          });
+        });
+      }
+    });
+
+    // Helper for vertical alignment coordinates
+    const getLayoutY = (index: number, total: number) => {
+      if (total <= 1) return 220;
+      return 60 + index * (320 / (total - 1));
+    };
+
+    // 1. Column: Meetings (X = 100)
+    recentMeetings.forEach((m, idx) => {
+      nodes.push({
+        id: m.id,
+        type: 'meeting',
+        label: m.title,
+        x: 80,
+        y: getLayoutY(idx, recentMeetings.length),
+        originalObj: m
+      });
+    });
+
+    // 2. Column: Decisions (X = 300)
+    relatedDecisions.forEach((d, idx) => {
+      nodes.push({
+        id: d.id,
+        type: 'decision',
+        label: d.title,
+        x: 280,
+        y: getLayoutY(idx, relatedDecisions.length),
+        originalObj: d
+      });
+      // Link: Meeting -> Decision
+      links.push({
+        id: `link-${d.meetingId}-${d.id}`,
+        source: d.meetingId,
+        target: d.id
+      });
+    });
+
+    // 3. Column: Tasks (X = 480)
+    relatedTasks.forEach((t, idx) => {
+      nodes.push({
+        id: t.id,
+        type: 'task',
+        label: `${t.role}: ${t.title}`,
+        x: 480,
+        y: getLayoutY(idx, relatedTasks.length),
+        originalObj: t
+      });
+      // Link: Meeting -> Task
+      if (t.meeting_id) {
+        links.push({
+          id: `link-${t.meeting_id}-${t.id}`,
+          source: t.meeting_id,
+          target: t.id
+        });
+      }
+    });
+
+    // 4. Column: Projects (X = 680)
+    relatedProjects.forEach((p, idx) => {
+      nodes.push({
+        id: p.id,
+        type: 'project',
+        label: p.name,
+        x: 680,
+        y: getLayoutY(idx, relatedProjects.length),
+        originalObj: p
+      });
+      // Link: Task -> Project
+      relatedTasks.forEach(t => {
+        if (t.project_id === p.id) {
+          links.push({
+            id: `link-${t.id}-${p.id}`,
+            source: t.id,
+            target: p.id
+          });
+        }
+      });
+    });
+
+    return { nodes, links };
+  }, [meetings, leadTeamTasks, projects]);
+
+  const handleNodeClick = (node: any) => {
+    if (node.type === 'meeting') {
+      setSelectedNode({
+        id: node.id,
+        type: 'meeting',
+        label: node.originalObj.title,
+        description: `Transcripción o resumen de la junta del ${node.originalObj.date}.`,
+        metadata: {
+          'Fecha': node.originalObj.date,
+          'Decisiones tomadas': node.originalObj.summary?.decisiones?.length || 0,
+          'Tareas sugeridas': node.originalObj.summary?.tareas?.length || 0
+        }
+      });
+    } else if (node.type === 'decision') {
+      setSelectedNode({
+        id: node.id,
+        type: 'decision',
+        label: node.label,
+        description: 'Acuerdo o decisión estratégica definida durante la sesión de dirección.',
+        metadata: {}
+      });
+    } else if (node.type === 'task') {
+      const project = projects.find(p => p.id === node.originalObj.project_id);
+      setSelectedNode({
+        id: node.id,
+        type: 'task',
+        label: node.originalObj.title,
+        description: node.originalObj.description || 'Sin descripción detallada.',
+        metadata: {
+          'Líder Responsable': node.originalObj.role,
+          'Estado': node.originalObj.status,
+          'Proyecto': project ? project.name : 'No vinculado',
+          'Fecha de Asignación': new Date(node.originalObj.created_at).toLocaleDateString('es-MX')
+        }
+      });
+    } else if (node.type === 'project') {
+      const projectTasks = leadTeamTasks.filter(t => t.project_id === node.id);
+      setSelectedNode({
+        id: node.id,
+        type: 'project',
+        label: node.label,
+        description: 'Proyecto estratégico de la empresa vinculado a las directrices del Lead Team.',
+        metadata: {
+          'Tareas de dirección activas': projectTasks.filter(t => t.status !== 'Completada').length,
+          'Tareas de dirección completadas': projectTasks.filter(t => t.status === 'Completada').length
+        }
+      });
     }
   };
 
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', background: '#f8fafc', minHeight: 'calc(100vh - 64px)' }}>
-      {/* Header */}
+      
+      {/* ── Main Dashboard Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ background: '#eff6ff', padding: '10px', borderRadius: '12px', display: 'flex' }}>
-            <ClipboardList size={24} color="var(--primary-color)" />
+            <Users size={24} color="var(--primary-color)" />
           </div>
           <div>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>Juntas Lead Team</h1>
-            <p style={{ color: '#64748b', fontSize: '0.875rem', margin: 0 }}>Gestión, minutas y extracción de tareas de tus sesiones del equipo de liderazgo</p>
+            <p style={{ color: '#64748b', fontSize: '0.875rem', margin: 0 }}>Módulo gerencial de dirección ejecutiva y control de acuerdos estratégicos</p>
           </div>
         </div>
 
@@ -376,315 +693,911 @@ Aquí está la transcripción de la junta:
             style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
           >
             <Plus size={16} />
-            Nueva Reunión
+            Nueva Junta
           </button>
         </div>
       </div>
 
-      {/* Main Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
-        {/* Left Side: Meetings List */}
-        <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
-          <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0', fontWeight: 700, color: '#334155', fontSize: '0.9rem' }}>
-            Historial de Sesiones ({meetings.length})
-          </div>
-          <div style={{ maxHeight: 'calc(100vh - 220px)', overflowY: 'auto' }}>
-            {loading ? (
-              <div style={{ padding: '32px 16px', display: 'flex', justifyContent: 'center' }}>
-                <Loader2 className="animate-spin" size={24} color="#64748b" />
-              </div>
-            ) : meetings.length === 0 ? (
-              <div style={{ padding: '32px 16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
-                No hay reuniones registradas.
-              </div>
-            ) : (
-              meetings.map(m => (
-                <div
-                  key={m.id}
-                  onClick={() => setSelectedMeeting(m)}
-                  style={{
-                    padding: '16px',
-                    borderBottom: '1px solid #f1f5f9',
-                    cursor: 'pointer',
-                    background: selectedMeeting?.id === m.id ? '#f0f9ff' : 'transparent',
-                    borderLeft: selectedMeeting?.id === m.id ? '4px solid var(--primary-color)' : '4px solid transparent',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.875rem', marginBottom: '4px' }}>{m.title}</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: '#64748b' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <Calendar size={12} />
-                      {m.date}
-                    </div>
-                    {m.summary && m.summary.tareas && (
-                      <span style={{ background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: '999px', fontWeight: 600 }}>
-                        Analizada
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Right Side: Meeting Details & Action Items */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {selectedMeeting ? (
-            <>
-              {/* Summary / Header Info */}
-              <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'start', flexWrap: 'wrap', gap: '16px' }}>
-                <div>
-                  <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', margin: '0 0 8px 0' }}>{selectedMeeting.title}</h2>
-                  <div style={{ display: 'flex', gap: '16px', color: '#64748b', fontSize: '0.85rem' }}>
-                    <span>Fecha: <strong>{selectedMeeting.date}</strong></span>
-                    <span>Creado: <strong>{new Date(selectedMeeting.created_at).toLocaleDateString('es-MX')}</strong></span>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    onClick={() => setConfirmDelete(selectedMeeting)}
-                    className="btn btn-secondary"
-                    style={{ border: '1px solid #fca5a5', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    <Trash2 size={16} /> Eliminar
-                  </button>
-                  <button
-                    onClick={handleAnalyzeTranscript}
-                    disabled={analyzing || !selectedMeeting.transcript}
-                    className="btn btn-primary"
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-                  >
-                    {analyzing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                    {selectedMeeting.summary && selectedMeeting.summary.tareas ? 'Re-analizar Minuta' : 'Analizar Minuta'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Action Items Box */}
-              <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', fontWeight: 700, color: '#334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>Tareas del Lead Team sugeridas</span>
-                  {selectedMeeting.summary && selectedMeeting.summary.tareas && (
-                    <span style={{ fontSize: '0.8rem', background: '#eff6ff', color: '#1e40af', padding: '4px 10px', borderRadius: '999px' }}>
-                      {extractedTasks.length} Tareas encontradas
-                    </span>
-                  )}
-                </div>
-
-                <div style={{ padding: '20px' }}>
-                  {!selectedMeeting.summary || !selectedMeeting.summary.tareas ? (
-                    <div style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
-                      <AlertTriangle size={32} color="#f59e0b" style={{ margin: '0 auto 12px auto' }} />
-                      <p style={{ margin: 0, fontWeight: 600, fontSize: '0.95rem', color: '#334155' }}>Esta reunión no ha sido analizada por Gemini</p>
-                      <p style={{ margin: '4px 0 16px 0', fontSize: '0.85rem' }}>Haz clic en el botón de arriba para extraer automáticamente las decisiones y tareas de la transcripción.</p>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      {extractedTasks.map((task, index) => (
-                        <div
-                          key={index}
-                          style={{
-                            border: '1px solid #e2e8f0',
-                            borderRadius: '10px',
-                            padding: '16px',
-                            background: '#f8fafc',
-                            display: 'grid',
-                            gridTemplateColumns: '1fr 300px',
-                            gap: '16px',
-                            alignItems: 'center'
-                          }}
-                        >
-                          {/* Task Info */}
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                              <span style={{ fontWeight: 700, color: '#1e293b', fontSize: '0.9rem' }}>{task.title}</span>
-                              <span style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', color: '#475569', fontSize: '0.75rem', fontWeight: 600, padding: '2px 8px', borderRadius: '999px' }}>
-                                {task.role}
-                              </span>
-                            </div>
-                            <p style={{ margin: 0, color: '#64748b', fontSize: '0.825rem', lineHeight: 1.4 }}>{task.description}</p>
-                          </div>
-
-                          {/* Database assignment fields */}
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            <div>
-                              <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 600, color: '#64748b', marginBottom: '4px' }}>Proyecto Asignado</label>
-                              <select
-                                value={task.selectedProjectId}
-                                onChange={(e) => setExtractedTasks(prev => prev.map((t, i) => i === index ? { ...t, selectedProjectId: e.target.value } : t))}
-                                style={{ width: '100%', padding: '6px 10px', fontSize: '0.8rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: 'white' }}
-                                disabled={task.status === 'saved'}
-                              >
-                                <option value="">Selecciona proyecto...</option>
-                                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                              </select>
-                            </div>
-
-                            <div>
-                              <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 600, color: '#64748b', marginBottom: '4px' }}>Responsable (Colaborador)</label>
-                              <select
-                                value={task.selectedAssigneeId}
-                                onChange={(e) => setExtractedTasks(prev => prev.map((t, i) => i === index ? { ...t, selectedAssigneeId: e.target.value } : t))}
-                                style={{ width: '100%', padding: '6px 10px', fontSize: '0.8rem', border: '1px solid #cbd5e1', borderRadius: '6px', background: 'white' }}
-                                disabled={task.status === 'saved'}
-                              >
-                                <option value="">Selecciona responsable...</option>
-                                {collaborators.map(c => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.full_name} ({c.email})
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <button
-                              onClick={() => handleSyncTask(index)}
-                              disabled={task.status === 'saved' || !task.selectedProjectId}
-                              className={`btn ${task.status === 'saved' ? 'btn-secondary' : 'btn-primary'}`}
-                              style={{
-                                marginTop: '4px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '6px',
-                                fontSize: '0.8rem',
-                                padding: '6px 12px'
-                              }}
-                            >
-                              {task.status === 'saved' ? (
-                                <><CheckCircle2 size={14} color="#16a34a" /> Agregado</>
-                              ) : (
-                                <><ArrowRight size={14} /> Sincronizar Tarea</>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Decisions Box */}
-              {selectedMeeting.summary && selectedMeeting.summary.decisiones && selectedMeeting.summary.decisiones.length > 0 && (
-                <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#334155', margin: '0 0 16px 0', borderBottom: '1px solid #f1f5f9', paddingBottom: '8px' }}>
-                    Acuerdos y Decisiones Clave
-                  </h3>
-                  <ul style={{ margin: 0, paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {selectedMeeting.summary.decisiones.map((dec, i) => (
-                      <li key={i} style={{ color: '#475569', fontSize: '0.85rem', lineHeight: 1.4 }}>{dec}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Transcript Box */}
-              {selectedMeeting.transcript && (
-                <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-                  <button
-                    onClick={() => setShowTranscript(!showTranscript)}
-                    style={{
-                      width: '100%',
-                      padding: '16px 20px',
-                      background: 'none',
-                      border: 'none',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      cursor: 'pointer',
-                      fontWeight: 700,
-                      color: '#334155',
-                      fontSize: '0.9rem'
-                    }}
-                  >
-                    <span>Ver transcripción original</span>
-                    {showTranscript ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  </button>
-
-                  {showTranscript && (
-                    <div style={{ padding: '20px', borderTop: '1px solid #e2e8f0', background: '#f8fafc' }}>
-                      <pre style={{
-                        margin: 0,
-                        whiteSpace: 'pre-wrap',
-                        fontFamily: 'inherit',
-                        fontSize: '0.825rem',
-                        color: '#475569',
-                        lineHeight: 1.5,
-                        maxHeight: '300px',
-                        overflowY: 'auto'
-                      }}>
-                        {selectedMeeting.transcript}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          ) : (
-            <div style={{ padding: '80px 20px', textAlign: 'center', background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', color: '#64748b' }}>
-              <FileText size={48} style={{ margin: '0 auto 16px auto', opacity: 0.5 }} />
-              <h3 style={{ margin: 0, color: '#334155', fontWeight: 600 }}>Selecciona una junta</h3>
-              <p style={{ margin: '4px 0 0 0', fontSize: '0.875rem' }}>Elige una reunión del historial de la izquierda o carga una nueva minuta.</p>
-            </div>
-          )}
-        </div>
+      {/* ── Tabs Navigation ── */}
+      <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', gap: '8px', paddingBottom: '2px' }}>
+        <button
+          onClick={() => setActiveTab('equipo')}
+          style={{
+            padding: '10px 16px',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            border: 'none',
+            background: 'transparent',
+            color: activeTab === 'equipo' ? 'var(--primary-color)' : '#64748b',
+            borderBottom: activeTab === 'equipo' ? '2px solid var(--primary-color)' : '2px solid transparent',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <Users size={16} />
+          Equipo
+        </button>
+        <button
+          onClick={() => setActiveTab('tareas')}
+          style={{
+            padding: '10px 16px',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            border: 'none',
+            background: 'transparent',
+            color: activeTab === 'tareas' ? 'var(--primary-color)' : '#64748b',
+            borderBottom: activeTab === 'tareas' ? '2px solid var(--primary-color)' : '2px solid transparent',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <ClipboardList size={16} />
+          Cola de Trabajo
+        </button>
+        <button
+          onClick={() => setActiveTab('boveda')}
+          style={{
+            padding: '10px 16px',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            border: 'none',
+            background: 'transparent',
+            color: activeTab === 'boveda' ? 'var(--primary-color)' : '#64748b',
+            borderBottom: activeTab === 'boveda' ? '2px solid var(--primary-color)' : '2px solid transparent',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <Network size={16} />
+          Bóveda de Conocimiento
+        </button>
+        <button
+          onClick={() => setActiveTab('juntas')}
+          style={{
+            padding: '10px 16px',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            border: 'none',
+            background: 'transparent',
+            color: activeTab === 'juntas' ? 'var(--primary-color)' : '#64748b',
+            borderBottom: activeTab === 'juntas' ? '2px solid var(--primary-color)' : '2px solid transparent',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <FileText size={16} />
+          Analítica de Juntas
+        </button>
       </div>
 
-      {/* Modal: Nueva Reunión */}
+      {/* ── Tab Content ── */}
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '300px' }}>
+          <Loader2 className="animate-spin" size={32} color="var(--primary-color)" />
+        </div>
+      ) : (
+        <>
+          {/* TAB 1: EQUIPO (CENTRO DE MANDO) */}
+          {activeTab === 'equipo' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              
+              {/* CEO Card (Capa de Mando) */}
+              <div style={{
+                background: 'linear-gradient(135deg, #1e3a8a, #3b82f6)',
+                borderRadius: '16px',
+                padding: '24px',
+                color: 'white',
+                boxShadow: '0 4px 6px -1px rgba(59, 130, 246, 0.15), 0 2px 4px -1px rgba(59, 130, 246, 0.1)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.15)', padding: '8px', borderRadius: '10px' }}>
+                      <Layers size={20} />
+                    </div>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>CEO</h3>
+                      <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>{ROLE_FOCUS['CEO']}</span>
+                    </div>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', background: 'rgba(255,255,255,0.2)', padding: '4px 10px', borderRadius: '99px', fontWeight: 600 }}>
+                    CAPA DE MANDO
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+                  <div style={{ background: 'rgba(255,255,255,0.08)', padding: '16px', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '0.8rem', opacity: 0.8, marginBottom: '4px' }}>Decisiones Clave</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 800 }}>{teamStats.decisiones}</div>
+                  </div>
+                  <div style={{ background: 'rgba(255,255,255,0.08)', padding: '16px', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '0.8rem', opacity: 0.8, marginBottom: '4px' }}>Memoria del Sistema</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 800 }}>{teamStats.memoria}</div>
+                  </div>
+                  <div style={{ background: 'rgba(255,255,255,0.08)', padding: '16px', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '0.8rem', opacity: 0.8, marginBottom: '4px' }}>Tareas Repartidas</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 800 }}>{teamStats.repartidas}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Specialist grid */}
+              <div>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#334155', marginBottom: '16px' }}>Estructura de Dirección Gerencial</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+                  {ROLES.map(role => {
+                    const stats = roleWorkload[role] || { queue: 0, inProgress: 0, completed: 0, total: 0 };
+                    const hasInProgress = stats.inProgress > 0;
+                    const hasQueue = stats.queue > 0;
+                    
+                    let statusLabel = 'LIBRE';
+                    let statusColor = '#64748b';
+                    let statusBg = '#f1f5f9';
+                    let isPulse = false;
+
+                    if (hasInProgress) {
+                      statusLabel = 'TRABAJANDO';
+                      statusColor = '#16a34a';
+                      statusBg = '#dcfce7';
+                      isPulse = true;
+                    } else if (hasQueue) {
+                      statusLabel = 'EN ESPERA';
+                      statusColor = '#d97706';
+                      statusBg = '#fef3c7';
+                    }
+
+                    // Get some active task titles
+                    const activeTasks = leadTeamTasks
+                      .filter(t => t.role === role && t.status !== 'Completada')
+                      .slice(0, 2);
+
+                    return (
+                      <div
+                        key={role}
+                        style={{
+                          background: 'white',
+                          borderRadius: '14px',
+                          border: '1px solid #e2e8f0',
+                          padding: '20px',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '16px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                          <div>
+                            <h4 style={{ margin: '0 0 2px 0', fontSize: '0.95rem', fontWeight: 700, color: '#1e293b' }}>{role}</h4>
+                            <span style={{ fontSize: '0.75rem', color: '#64748b', display: 'block', minHeight: '32px' }}>{ROLE_FOCUS[role]}</span>
+                          </div>
+                          <span
+                            className={isPulse ? 'animate-pulse' : ''}
+                            style={{
+                              fontSize: '0.7rem',
+                              background: statusBg,
+                              color: statusColor,
+                              padding: '4px 10px',
+                              borderRadius: '99px',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            {statusLabel}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', background: '#f8fafc', padding: '10px', borderRadius: '8px', textAlign: 'center' }}>
+                          <div>
+                            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Cola</div>
+                            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#475569' }}>{stats.queue}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>En Curso</div>
+                            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#475569' }}>{stats.inProgress}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Hechas</div>
+                            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#475569' }}>{stats.completed}</div>
+                          </div>
+                        </div>
+
+                        <div style={{ flexGrow: 1 }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Enfoque Activo:</div>
+                          {activeTasks.length === 0 ? (
+                            <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic' }}>Sin tareas activas asignadas.</span>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              {activeTasks.map(t => (
+                                <div key={t.id} style={{ display: 'flex', gap: '6px', alignItems: 'center', background: '#f8fafc', padding: '6px 8px', borderRadius: '6px', border: '1px dashed #e2e8f0' }}>
+                                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.status === 'En Curso' ? '#16a34a' : '#d97706' }} />
+                                  <span style={{ fontSize: '0.75rem', color: '#334155', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '240px' }} title={t.title}>
+                                    {t.title}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: TAREAS (COLA DE TRABAJO GERENCIAL) */}
+          {activeTab === 'tareas' && (
+            <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              
+              {/* Role Filters */}
+              <div style={{ display: 'flex', gap: '8px', padding: '16px 20px', borderBottom: '1px solid #e2e8f0', overflowX: 'auto', background: '#fafafa' }}>
+                {['TODOS', 'CEO', ...ROLES].map(role => (
+                  <button
+                    key={role}
+                    onClick={() => setActiveRoleFilter(role)}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      borderRadius: '8px',
+                      border: '1px solid',
+                      borderColor: activeRoleFilter === role ? 'var(--primary-color)' : '#e2e8f0',
+                      background: activeRoleFilter === role ? '#eff6ff' : 'white',
+                      color: activeRoleFilter === role ? 'var(--primary-color)' : '#475569',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {role}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tasks Table */}
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontWeight: 600 }}>
+                      <th style={{ padding: '12px 20px', width: '90px' }}>HORA</th>
+                      <th style={{ padding: '12px 20px', width: '160px' }}>GERENTE</th>
+                      <th style={{ padding: '12px 20px', width: '130px' }}>ESTADO</th>
+                      <th style={{ padding: '12px 20px' }}>TAREA</th>
+                      <th style={{ padding: '12px 20px', width: '220px' }}>PROYECTO VINCULADO</th>
+                      <th style={{ padding: '12px 20px', width: '140px' }}>MODELO</th>
+                      <th style={{ padding: '12px 20px', width: '60px' }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredTasks.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+                          No hay tareas en esta cola para el filtro seleccionado.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredTasks.map(task => (
+                        <tr key={task.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '16px 20px', color: '#64748b', fontWeight: 500 }}>
+                            {task.due_time ? task.due_time.substring(0, 5) : '09:00'}
+                          </td>
+                          <td style={{ padding: '16px 20px' }}>
+                            <span style={{
+                              background: task.role === 'CEO' ? '#eff6ff' : '#f1f5f9',
+                              color: task.role === 'CEO' ? 'var(--primary-color)' : '#334155',
+                              padding: '4px 8px',
+                              borderRadius: '6px',
+                              fontWeight: 600,
+                              fontSize: '0.75rem'
+                            }}>
+                              {task.role}
+                            </span>
+                          </td>
+                          <td style={{ padding: '16px 20px' }}>
+                            <select
+                              value={task.status}
+                              onChange={(e) => handleUpdateTaskStatus(task.id, e.target.value)}
+                              style={{
+                                padding: '4px 8px',
+                                borderRadius: '6px',
+                                border: '1px solid #cbd5e1',
+                                fontSize: '0.8rem',
+                                outline: 'none',
+                                background: task.status === 'Completada' ? '#dcfce7' : task.status === 'En Curso' ? '#eff6ff' : 'white',
+                                color: task.status === 'Completada' ? '#15803d' : task.status === 'En Curso' ? '#1d4ed8' : '#334155',
+                                fontWeight: 600
+                              }}
+                            >
+                              <option value="En Cola">En Cola</option>
+                              <option value="En Curso">En Curso</option>
+                              <option value="Completada">Completada</option>
+                            </select>
+                          </td>
+                          <td style={{ padding: '16px 20px' }}>
+                            <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: '2px' }}>{task.title}</div>
+                            {task.description && (
+                              <div style={{ color: '#64748b', fontSize: '0.75rem', lineHeight: '1.25' }}>{task.description}</div>
+                            )}
+                          </td>
+                          <td style={{ padding: '16px 20px' }}>
+                            <select
+                              value={task.project_id || ''}
+                              onChange={(e) => handleUpdateTaskProject(task.id, e.target.value || null)}
+                              style={{
+                                width: '100%',
+                                padding: '4px 8px',
+                                borderRadius: '6px',
+                                border: '1px solid #cbd5e1',
+                                fontSize: '0.8rem',
+                                outline: 'none',
+                                background: task.project_id ? '#fff' : '#f8fafc',
+                                color: task.project_id ? '#0f172a' : '#64748b'
+                              }}
+                            >
+                              <option value="">-- Sin Proyecto --</option>
+                              {projects.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td style={{ padding: '16px 20px', color: '#64748b' }}>
+                            <span style={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>
+                              {task.model || 'manual'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '16px 20px', textAlign: 'right' }}>
+                            <button
+                              onClick={() => handleDeleteTask(task.id)}
+                              style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', padding: '4px', borderRadius: '4px' }}
+                              title="Eliminar tarea"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: BÓVEDA DE CONOCIMIENTO (MAPA DE CONEXIONES) */}
+          {activeTab === 'boveda' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '20px', alignItems: 'start' }}>
+              
+              {/* Node Graph Display */}
+              <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#334155' }}>Mapa de Conexiones del Lead Team</h3>
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b' }}>Muestra cómo interactúan las minutas, acuerdos, tareas gerenciales y proyectos reales.</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '10px', fontSize: '0.7rem', color: '#64748b' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }} /> Junta
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} /> Acuerdo
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#8b5cf6' }} /> Tarea Liderazgo
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#eab308' }} /> Proyecto
+                    </div>
+                  </div>
+                </div>
+
+                {graphData.nodes.length === 0 ? (
+                  <div style={{ height: '400px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: '#94a3b8', border: '1px dashed #cbd5e1', borderRadius: '8px' }}>
+                    <HelpCircle size={32} style={{ marginBottom: '8px' }} />
+                    <span>No hay suficientes datos registrados para generar el mapa.</span>
+                  </div>
+                ) : (
+                  <div style={{ border: '1px solid #f1f5f9', borderRadius: '8px', background: '#fafafa', position: 'relative', overflow: 'hidden' }}>
+                    <svg width="100%" height="450px" style={{ minWidth: '760px' }}>
+                      {/* Define Arrow Markers */}
+                      <defs>
+                        <marker id="arrow" viewBox="0 0 10 10" refX="15" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                          <path d="M 0 1 L 10 5 L 0 9 z" fill="#cbd5e1" />
+                        </marker>
+                        <marker id="arrow-selected" viewBox="0 0 10 10" refX="15" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                          <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--primary-color)" />
+                        </marker>
+                      </defs>
+
+                      {/* Render links */}
+                      {graphData.links.map(link => {
+                        const sourceNode = graphData.nodes.find(n => n.id === link.source);
+                        const targetNode = graphData.nodes.find(n => n.id === link.target);
+                        if (!sourceNode || !targetNode) return null;
+
+                        const isHighlighted = 
+                          hoveredNodeId === link.source || hoveredNodeId === link.target ||
+                          selectedNode?.id === link.source || selectedNode?.id === link.target;
+
+                        return (
+                          <line
+                            key={link.id}
+                            x1={sourceNode.x}
+                            y1={sourceNode.y}
+                            x2={targetNode.x}
+                            y2={targetNode.y}
+                            stroke={isHighlighted ? 'var(--primary-color)' : '#cbd5e1'}
+                            strokeWidth={isHighlighted ? 2.5 : 1.5}
+                            markerEnd={isHighlighted ? 'url(#arrow-selected)' : 'url(#arrow)'}
+                            strokeDasharray={sourceNode.type === 'meeting' && targetNode.type === 'decision' ? '4 2' : '0'}
+                            style={{ transition: 'all 0.15s ease' }}
+                          />
+                        );
+                      })}
+
+                      {/* Render nodes */}
+                      {graphData.nodes.map(node => {
+                        const isSelected = selectedNode?.id === node.id;
+                        const isHovered = hoveredNodeId === node.id;
+
+                        let color = '#3b82f6'; // meeting
+                        if (node.type === 'decision') color = '#10b981';
+                        else if (node.type === 'task') color = '#8b5cf6';
+                        else if (node.type === 'project') color = '#eab308';
+
+                        return (
+                          <g
+                            key={node.id}
+                            onMouseEnter={() => setHoveredNodeId(node.id)}
+                            onMouseLeave={() => setHoveredNodeId(null)}
+                            onClick={() => handleNodeClick(node)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            {/* Glow circle for select/hover */}
+                            {(isSelected || isHovered) && (
+                              <circle
+                                cx={node.x}
+                                cy={node.y}
+                                r={18}
+                                fill={color}
+                                opacity={0.2}
+                                style={{ transition: 'all 0.15s ease' }}
+                              />
+                            )}
+                            {/* Main circle */}
+                            <circle
+                              cx={node.x}
+                              cy={node.y}
+                              r={12}
+                              fill={color}
+                              stroke="white"
+                              strokeWidth={2}
+                              style={{ transition: 'all 0.15s ease' }}
+                            />
+                            {/* Labels */}
+                            <text
+                              x={node.x}
+                              y={node.y - 18}
+                              textAnchor="middle"
+                              fill="#1e293b"
+                              style={{
+                                fontSize: '0.65rem',
+                                fontWeight: isSelected || isHovered ? 700 : 500,
+                                fontFamily: 'inherit',
+                                pointerEvents: 'none'
+                              }}
+                            >
+                              {node.label.length > 22 ? `${node.label.substring(0, 19)}...` : node.label}
+                            </text>
+                            {/* Small icon representation letter */}
+                            <text
+                              x={node.x}
+                              y={node.y + 3.5}
+                              textAnchor="middle"
+                              fill="white"
+                              style={{
+                                fontSize: '0.6rem',
+                                fontWeight: 800,
+                                fontFamily: 'monospace',
+                                pointerEvents: 'none'
+                              }}
+                            >
+                              {node.type.substring(0, 1).toUpperCase()}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                  </div>
+                )}
+              </div>
+
+              {/* Node Details Card */}
+              <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', minHeight: '300px' }}>
+                <h3 style={{ margin: '0 0 16px 0', fontSize: '0.95rem', fontWeight: 700, color: '#334155' }}>Detalle de Selección</h3>
+
+                {!selectedNode ? (
+                  <div style={{ textAlign: 'center', padding: '40px 10px', color: '#94a3b8' }}>
+                    <Network size={32} style={{ margin: '0 auto 12px auto' }} />
+                    <p style={{ fontSize: '0.8rem', margin: 0 }}>Haz clic en un nodo en el mapa para explorar sus detalles y conexiones.</p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div>
+                      <span style={{
+                        fontSize: '0.65rem',
+                        fontWeight: 700,
+                        padding: '3px 8px',
+                        borderRadius: '99px',
+                        background: selectedNode.type === 'meeting' ? '#dbeafe' : selectedNode.type === 'decision' ? '#d1fae5' : selectedNode.type === 'task' ? '#f3e8ff' : '#fef9c3',
+                        color: selectedNode.type === 'meeting' ? '#1e40af' : selectedNode.type === 'decision' ? '#065f46' : selectedNode.type === 'task' ? '#6b21a8' : '#854d0e'
+                      }}>
+                        {selectedNode.type.toUpperCase()}
+                      </span>
+                      <h4 style={{ margin: '8px 0 4px 0', fontSize: '0.95rem', fontWeight: 700, color: '#0f172a' }}>{selectedNode.label}</h4>
+                      {selectedNode.description && (
+                        <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b', lineHeight: '1.4' }}>{selectedNode.description}</p>
+                      )}
+                    </div>
+
+                    {Object.keys(selectedNode.metadata || {}).length > 0 && (
+                      <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: '8px' }}>Atributos:</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          {Object.entries(selectedNode.metadata || {}).map(([k, v]) => (
+                            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem' }}>
+                              <span style={{ color: '#64748b' }}>{k}</span>
+                              <span style={{ fontWeight: 600, color: '#334155' }}>{v}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: ANALÍTICA DE JUNTAS (HISTORIAL Y PROCESAMIENTO) */}
+          {activeTab === 'juntas' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
+              
+              {/* Meeting List Sidebar */}
+              <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+                <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0', fontWeight: 700, color: '#334155', fontSize: '0.9rem' }}>
+                  Historial de Sesiones ({meetings.length})
+                </div>
+                <div style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
+                  {meetings.length === 0 ? (
+                    <div style={{ padding: '32px 16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
+                      No hay reuniones registradas.
+                    </div>
+                  ) : (
+                    meetings.map(m => (
+                      <div
+                        key={m.id}
+                        onClick={() => setSelectedMeeting(m)}
+                        style={{
+                          padding: '16px',
+                          borderBottom: '1px solid #f1f5f9',
+                          cursor: 'pointer',
+                          background: selectedMeeting?.id === m.id ? '#f0f9ff' : 'transparent',
+                          borderLeft: selectedMeeting?.id === m.id ? '4px solid var(--primary-color)' : '4px solid transparent',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.875rem', marginBottom: '4px' }}>{m.title}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: '#64748b' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Calendar size={12} />
+                            {m.date}
+                          </div>
+                          {m.summary && m.summary.tareas && m.summary.tareas.length > 0 && (
+                            <span style={{ background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: '999px', fontWeight: 600 }}>
+                              Analizada
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Meeting View Area */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {selectedMeeting ? (
+                  <>
+                    {/* Header Info */}
+                    <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'start', flexWrap: 'wrap', gap: '16px' }}>
+                      <div>
+                        <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a', margin: '0 0 8px 0' }}>{selectedMeeting.title}</h2>
+                        <div style={{ display: 'flex', gap: '16px', color: '#64748b', fontSize: '0.85rem' }}>
+                          <span>Fecha de Junta: <strong>{selectedMeeting.date}</strong></span>
+                          <span>Registrada: <strong>{new Date(selectedMeeting.created_at).toLocaleDateString('es-MX')}</strong></span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          onClick={() => setConfirmDelete(selectedMeeting)}
+                          className="btn btn-secondary"
+                          style={{ border: '1px solid #fca5a5', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <Trash2 size={16} />
+                          Eliminar Sesión
+                        </button>
+                        <button
+                          onClick={handleAnalyzeTranscript}
+                          disabled={analyzing || !selectedMeeting.transcript}
+                          className="btn btn-primary"
+                          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          {analyzing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                          {selectedMeeting.summary && selectedMeeting.summary.tareas ? 'Re-analizar con IA' : 'Procesar con IA'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Decisions Box */}
+                    {selectedMeeting.summary && selectedMeeting.summary.decisiones && selectedMeeting.summary.decisiones.length > 0 && (
+                      <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                        <h3 style={{ margin: '0 0 12px 0', fontSize: '0.95rem', fontWeight: 700, color: '#334155', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <CheckCircle2 size={18} color="#10b981" />
+                          Acuerdos y Decisiones Clave
+                        </h3>
+                        <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.85rem', color: '#475569', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {selectedMeeting.summary.decisiones.map((d, index) => (
+                            <li key={index}>{d}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Suggested Tasks Box */}
+                    <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                      <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', fontWeight: 700, color: '#334155', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>Tareas Gerenciales Sugeridas</span>
+                        {extractedTasks.length > 0 && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontSize: '0.8rem', background: '#eff6ff', color: '#1e40af', padding: '4px 10px', borderRadius: '999px', fontWeight: 600 }}>
+                              {extractedTasks.length} Tareas encontradas
+                            </span>
+                            <button
+                              onClick={handleImportAllSuggestedTasks}
+                              className="btn btn-primary"
+                              style={{ padding: '4px 12px', fontSize: '0.75rem' }}
+                            >
+                              Importar Todo
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ padding: '20px' }}>
+                        {!selectedMeeting.summary || !selectedMeeting.summary.tareas ? (
+                          <div style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
+                            <AlertTriangle size={32} color="#f59e0b" style={{ margin: '0 auto 12px auto' }} />
+                            <p style={{ margin: 0, fontWeight: 600, fontSize: '0.95rem', color: '#334155' }}>Esta reunión no ha sido analizada</p>
+                            <p style={{ margin: '4px 0 16px 0', fontSize: '0.85rem' }}>Haz clic en el botón de arriba para extraer automáticamente los acuerdos y tareas con Gemini.</p>
+                          </div>
+                        ) : extractedTasks.length === 0 ? (
+                          <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
+                            No se detectaron tareas gerenciales en la transcripción.
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                            {extractedTasks.map((task, index) => (
+                              <div
+                                key={index}
+                                style={{
+                                  border: '1px solid #e2e8f0',
+                                  borderRadius: '10px',
+                                  padding: '16px',
+                                  background: '#f8fafc',
+                                  display: 'grid',
+                                  gridTemplateColumns: '1fr 300px',
+                                  gap: '16px',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', background: '#eff6ff', color: 'var(--primary-color)' }}>
+                                      {task.role}
+                                    </span>
+                                    <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 700, color: '#1e293b' }}>{task.title}</h4>
+                                  </div>
+                                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b', lineHeight: '1.3' }}>{task.description}</p>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'flex-end' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '160px' }}>
+                                    <span style={{ fontSize: '0.65rem', color: '#64748b', fontWeight: 600 }}>PROYECTO RELACIONADO</span>
+                                    <select
+                                      value={task.selectedProjectId || ''}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setExtractedTasks(prev => prev.map((t, idx) => idx === index ? { ...t, selectedProjectId: val } : t));
+                                      }}
+                                      style={{
+                                        padding: '4px 6px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #cbd5e1',
+                                        fontSize: '0.75rem',
+                                        outline: 'none'
+                                      }}
+                                    >
+                                      <option value="">-- Sin Proyecto --</option>
+                                      {projects.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div>
+                                    {task.status === 'saved' ? (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#16a34a', fontSize: '0.75rem', fontWeight: 700, padding: '6px 12px', background: '#dcfce7', borderRadius: '6px' }}>
+                                        <Check size={14} /> Importada
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleImportSuggestedTask(index)}
+                                        disabled={task.status === 'pending'}
+                                        className="btn btn-secondary"
+                                        style={{ fontSize: '0.75rem', padding: '6px 12px', whiteSpace: 'nowrap' }}
+                                      >
+                                        {task.status === 'pending' ? <Loader2 size={12} className="animate-spin" /> : 'Guardar en Cola'}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Transcript Details Area */}
+                    <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                      <button
+                        onClick={() => setShowTranscript(!showTranscript)}
+                        style={{
+                          width: '100%',
+                          padding: '16px 20px',
+                          border: 'none',
+                          background: 'transparent',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          fontWeight: 700,
+                          color: '#334155',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <FileText size={18} color="#64748b" />
+                          Ver Transcripción Completa de la Junta
+                        </span>
+                        {showTranscript ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                      </button>
+
+                      {showTranscript && (
+                        <div style={{ padding: '20px', borderTop: '1px solid #e2e8f0', background: '#fafafa' }}>
+                          <pre style={{
+                            margin: 0,
+                            fontFamily: 'inherit',
+                            fontSize: '0.8rem',
+                            color: '#475569',
+                            whiteSpace: 'pre-wrap',
+                            lineHeight: '1.5'
+                          }}>
+                            {selectedMeeting.transcript || 'Sin transcripción registrada.'}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ background: 'white', borderRadius: '12px', border: '1px dashed #cbd5e1', padding: '60px 20px', textAlign: 'center', color: '#94a3b8' }}>
+                    <FileText size={48} style={{ margin: '0 auto 16px auto', opacity: 0.5 }} />
+                    <h3 style={{ margin: 0, color: '#475569' }}>Ninguna sesión seleccionada</h3>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem' }}>Selecciona una junta del historial a la izquierda o registra una nueva junta.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Modal: Nueva Junta ── */}
       {showFormModal && (
-        <div className="modal-overlay" onClick={() => setShowFormModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-            <div className="modal-header">
-              <h3 className="modal-title">Registrar Nueva Reunión</h3>
-              <button className="modal-close" onClick={() => setShowFormModal(false)}>×</button>
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(15, 23, 42, 0.4)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            width: '600px',
+            maxWidth: '90%',
+            maxHeight: '90vh',
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' }}>Registrar Nueva Junta del Lead Team</h3>
+              <button onClick={() => setShowFormModal(false)} style={{ border: 'none', background: 'transparent', fontSize: '1.25rem', cursor: 'pointer', color: '#94a3b8' }}>×</button>
             </div>
 
-            <form onSubmit={handleSaveMeeting} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-              <div style={{ padding: '24px 32px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label>Título de la Reunión</label>
+            <form onSubmit={handleSaveMeeting} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 150px', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>TÍTULO DE JUNTA</label>
                   <input
                     type="text"
-                    className="form-input"
-                    placeholder="Ej: Junta Directiva Lead Team 24 de Agosto"
+                    required
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    required
+                    placeholder="Ej. Sesión de Lead Team 2026-08-24"
+                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
                   />
                 </div>
 
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label>Fecha</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>FECHA</label>
                   <input
                     type="date"
-                    className="form-input"
+                    required
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
-                    required
-                  />
-                </div>
-
-                <div className="form-group" style={{ marginBottom: 0, flex: 1, display: 'flex', flexDirection: 'column' }}>
-                  <label>Transcripción o Minuta Escrita</label>
-                  <textarea
-                    className="form-input"
-                    rows={8}
-                    placeholder="Pega aquí la transcripción de voz, notas tomadas o resumen escrito de la sesión de Google Meet / Calendar..."
-                    value={transcript}
-                    onChange={(e) => setTranscript(e.target.value)}
-                    style={{ flex: 1, resize: 'vertical' }}
+                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
                   />
                 </div>
               </div>
 
-              <div className="modal-actions" style={{ padding: '20px 32px', borderTop: '1px solid #e2e8f0', background: '#fcfdfe' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowFormModal(false)} disabled={saving}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? 'Guardando...' : 'Registrar y Continuar'}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>TRANSCRIPCIÓN O ACTA DE LA REUNIÓN</label>
+                <textarea
+                  value={transcript}
+                  onChange={(e) => setTranscript(e.target.value)}
+                  placeholder="Pega aquí la transcripción completa de la junta (obtenida de Google Calendar / Meet)..."
+                  style={{
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '0.85rem',
+                    minHeight: '200px',
+                    fontFamily: 'inherit',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+
+              <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button type="button" onClick={() => setShowFormModal(false)} className="btn btn-secondary">Cancelar</button>
+                <button type="submit" disabled={saving} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {saving && <Loader2 size={14} className="animate-spin" />}
+                  Guardar Junta
                 </button>
               </div>
             </form>
@@ -692,101 +1605,103 @@ Aquí está la transcripción de la junta:
         </div>
       )}
 
-      {/* Modal: Configuración Clave Gemini */}
+      {/* ── Modal: Configuración de Gemini ── */}
       {showConfigModal && (
-        <div className="modal-overlay" onClick={() => setShowConfigModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px' }}>
-            <div className="modal-header">
-              <h3 className="modal-title">Configuración de Inteligencia Artificial</h3>
-              <button className="modal-close" onClick={() => setShowConfigModal(false)}>×</button>
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(15, 23, 42, 0.4)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '16px',
+            width: '450px',
+            maxWidth: '90%',
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
+            padding: '24px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' }}>Configurar API de Gemini</h3>
+              <button onClick={() => setShowConfigModal(false)} style={{ border: 'none', background: 'transparent', fontSize: '1.25rem', cursor: 'pointer', color: '#94a3b8' }}>×</button>
             </div>
 
-            <div style={{ padding: '20px 24px' }}>
-              <div style={{ display: 'flex', gap: '12px', background: '#fffbeb', border: '1px solid #fef3c7', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
-                <AlertCircle size={20} color="#d97706" style={{ flexShrink: 0 }} />
-                <p style={{ margin: 0, fontSize: '0.8rem', color: '#b45309', lineHeight: 1.4 }}>
-                  Para procesar la transcripción y extraer tareas requerimos una clave de la API de Google Gemini. Tu clave se almacena localmente y de forma segura en tu navegador.
-                </p>
-              </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>API KEY DE GOOGLE AI STUDIO</label>
+              <input
+                type="password"
+                value={geminiKey}
+                onChange={(e) => {
+                  setGeminiKey(e.target.value);
+                  if (e.target.value) fetchAvailableModels(e.target.value);
+                }}
+                placeholder="Pega tu API Key de Gemini..."
+                style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+              />
+            </div>
 
-              <div className="form-group">
-                <label>Gemini API Key</label>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="password"
-                    className="form-input"
-                    placeholder="AIzaSy..."
-                    value={geminiKey}
-                    onChange={(e) => setGeminiKey(e.target.value)}
-                    style={{ flex: 1 }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fetchAvailableModels(geminiKey)}
-                    disabled={loadingModels || !geminiKey}
-                    className="btn btn-secondary"
-                    style={{ padding: '8px 12px', fontSize: '0.8rem', whiteSpace: 'nowrap' }}
-                  >
-                    {loadingModels ? <Loader2 size={14} className="animate-spin" /> : 'Verificar Key'}
-                  </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>MODELO SELECCIONADO</label>
+              {loadingModels ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#64748b', padding: '8px 0' }}>
+                  <Loader2 className="animate-spin" size={14} /> Cargando modelos disponibles de tu cuenta...
                 </div>
-                <span style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px', display: 'block' }}>
-                  Puedes conseguir una clave gratuita en Google AI Studio.
-                </span>
-              </div>
-
-              <div className="form-group" style={{ marginTop: '16px' }}>
-                <label>Modelo de IA</label>
-                {loadingModels && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: '#64748b', marginBottom: '6px' }}>
-                    <Loader2 size={12} className="animate-spin" /> Cargando modelos disponibles...
+              ) : modelLoadError ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ fontSize: '0.75rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <AlertCircle size={14} /> Error al consultar modelos: {modelLoadError}
                   </div>
-                )}
-                {modelLoadError && (
-                  <div style={{ fontSize: '0.75rem', color: '#ef4444', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <AlertTriangle size={12} /> {modelLoadError}. Usando lista predeterminada.
-                  </div>
-                )}
+                  <input
+                    type="text"
+                    value={geminiModel}
+                    onChange={(e) => setGeminiModel(e.target.value)}
+                    placeholder="Escribe el modelo (ej: gemini-1.5-flash)"
+                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                  />
+                </div>
+              ) : (
                 <select
-                  className="form-input"
                   value={geminiModel}
                   onChange={(e) => setGeminiModel(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', fontSize: '0.875rem', border: '1px solid var(--border-color)', borderRadius: '8px', background: 'white' }}
+                  style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', outline: 'none' }}
                 >
-                  {availableModels.length > 0 ? (
-                    availableModels.map(modelId => (
-                      <option key={modelId} value={modelId}>{modelId}</option>
-                    ))
+                  {availableModels.length === 0 ? (
+                    <option value="gemini-1.5-flash">gemini-1.5-flash (predeterminado)</option>
                   ) : (
-                    <>
-                      <option value="gemini-1.5-flash">gemini-1.5-flash (Recomendado - Rápido)</option>
-                      <option value="gemini-1.5-pro">gemini-1.5-pro (Más Inteligente)</option>
-                      <option value="gemini-2.0-flash-exp">gemini-2.0-flash-exp (Experimental)</option>
-                      <option value="gemini-1.0-pro">gemini-1.0-pro (Legacy)</option>
-                    </>
+                    availableModels.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))
                   )}
                 </select>
-              </div>
+              )}
             </div>
 
-            <div className="modal-actions" style={{ padding: '16px 24px', borderTop: '1px solid #e2e8f0' }}>
-              <button type="button" className="btn btn-secondary" onClick={() => setShowConfigModal(false)}>Cancelar</button>
-              <button type="button" className="btn btn-primary" onClick={handleSaveConfig}>Guardar Clave</button>
+            <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button onClick={() => setShowConfigModal(false)} className="btn btn-secondary">Cancelar</button>
+              <button onClick={handleSaveConfig} className="btn btn-primary">Guardar Configuración</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Confirmación Borrado */}
-      <ConfirmModal
-        isOpen={confirmDelete !== null}
-        title="Eliminar junta"
-        message={confirmDelete ? `¿Seguro que deseas eliminar la junta "${confirmDelete.title}" y todos sus análisis asociados? Esta acción no se puede deshacer.` : ''}
-        confirmText={deleting ? 'Eliminando...' : 'Sí, eliminar'}
-        isDestructive={true}
-        onConfirm={handleDeleteMeeting}
-        onClose={() => setConfirmDelete(null)}
-      />
+      {/* ── Confirm Delete Modal ── */}
+      {confirmDelete && (
+        <ConfirmModal
+          isOpen={!!confirmDelete}
+          title="¿Eliminar sesión?"
+          message={`¿Estás seguro de que deseas eliminar permanentemente la sesión "${confirmDelete.title}" y todos sus análisis? Esta acción no se puede deshacer.`}
+          confirmText="Eliminar"
+          isDestructive={true}
+          onConfirm={handleDeleteMeeting}
+          onClose={() => setConfirmDelete(null)}
+        />
+      )}
     </div>
   );
 }
