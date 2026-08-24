@@ -58,6 +58,10 @@ export default function Sidebar() {
               <UserCheck size={18} />
               <span>Colaboradores</span>
             </NavLink>
+            <NavLink to="/lead-team-meetings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} title="Juntas Lead Team">
+              <ClipboardList size={18} />
+              <span>Juntas Lead Team</span>
+            </NavLink>
 
             <div className="nav-section">GESTIÓN ENTERPRISE</div>
             <div className="nav-item" style={{ opacity: 0.5, cursor: 'not-allowed' }} title="Configuración">

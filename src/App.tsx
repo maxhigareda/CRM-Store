@@ -13,6 +13,7 @@ import Admin from './pages/Admin';
 import Clients from './pages/Clients';
 import Tags from './pages/Tags';
 import Home from './pages/Home';
+import LeadTeamMeetings from './pages/LeadTeamMeetings';
 import Dashboard from './pages/Financiero/Dashboard';
 import FacturasTabla from './pages/Financiero/Tablas/Facturas';
 import Conciliacion from './pages/Financiero/Conciliacion';
@@ -38,6 +39,7 @@ function App() {
               <Route path="admin" element={<Admin />} />
               <Route path="clients" element={<Clients />} />
               <Route path="tags" element={<Tags />} />
+              <Route path="lead-team-meetings" element={<LeadTeamMeetings />} />
             </Route>
 
             <Route path="financiero" element={<FinancieroLayout />}>
