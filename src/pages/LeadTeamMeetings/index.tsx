@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Calendar, ClipboardList, CheckCircle2, AlertCircle, Trash2,
+  ClipboardList, CheckCircle2, AlertCircle, Trash2,
   Loader2, Plus, FileText, Sparkles, Settings,
   ChevronDown, ChevronUp, AlertTriangle, Users, 
   Layers, Check, HelpCircle, Network
@@ -95,6 +95,13 @@ export default function LeadTeamMeetings() {
   const [extractedTasks, setExtractedTasks] = useState<ExtractedTask[]>([]);
   const [showTranscript, setShowTranscript] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<Meeting | null>(null);
+
+  // Calendar-based selection for Analítica de Juntas (limited to last 3 months: current month + 2 past months)
+  const [currentCalendarMonth, setCurrentCalendarMonth] = useState(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  });
+  const [selectedCalendarDay, setSelectedCalendarDay] = useState<number | null>(null);
 
   // Bóveda de Conocimiento Selected Node Details
   const [selectedNode, setSelectedNode] = useState<{
@@ -455,6 +462,76 @@ Aquí está la transcripción de la junta:
       showNotification('error', 'Error al eliminar tarea: ' + err.message);
     }
   };
+
+  // ── Calendar Helpers for Juntas Selection ──
+  const calendarLimits = useMemo(() => {
+    const today = new Date();
+    const maxMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const minMonth = new Date(today.getFullYear(), today.getMonth() - 2, 1);
+    return { minMonth, maxMonth };
+  }, []);
+
+  const handlePrevMonth = () => {
+    setCurrentCalendarMonth(prev => {
+      const nextDate = new Date(prev.getFullYear(), prev.getMonth() - 1, 1);
+      if (nextDate.getTime() >= calendarLimits.minMonth.getTime()) {
+        setSelectedCalendarDay(null);
+        return nextDate;
+      }
+      return prev;
+    });
+  };
+
+  const handleNextMonth = () => {
+    setCurrentCalendarMonth(prev => {
+      const nextDate = new Date(prev.getFullYear(), prev.getMonth() + 1, 1);
+      if (nextDate.getTime() <= calendarLimits.maxMonth.getTime()) {
+        setSelectedCalendarDay(null);
+        return nextDate;
+      }
+      return prev;
+    });
+  };
+
+  const calendarDays = useMemo(() => {
+    const year = currentCalendarMonth.getFullYear();
+    const month = currentCalendarMonth.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const firstDayIndex = new Date(year, month, 1).getDay();
+
+    const cells: Array<{ type: 'empty' | 'day'; dayNum?: number; dateStr?: string }> = [];
+    for (let i = 0; i < firstDayIndex; i++) {
+      cells.push({ type: 'empty' });
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+      cells.push({ type: 'day', dayNum: i, dateStr });
+    }
+    return cells;
+  }, [currentCalendarMonth]);
+
+  const meetingsByDate = useMemo(() => {
+    const map: Record<string, Meeting[]> = {};
+    meetings.forEach(m => {
+      if (m.date) {
+        if (!map[m.date]) map[m.date] = [];
+        map[m.date].push(m);
+      }
+    });
+    return map;
+  }, [meetings]);
+
+  const selectedDateStr = useMemo(() => {
+    if (selectedCalendarDay === null) return null;
+    const year = currentCalendarMonth.getFullYear();
+    const month = currentCalendarMonth.getMonth();
+    return `${year}-${String(month + 1).padStart(2, '0')}-${String(selectedCalendarDay).padStart(2, '0')}`;
+  }, [currentCalendarMonth, selectedCalendarDay]);
+
+  const selectedDayMeetings = useMemo(() => {
+    if (!selectedDateStr) return [];
+    return meetingsByDate[selectedDateStr] || [];
+  }, [selectedDateStr, meetingsByDate]);
 
   // ── Computed Statistics for Capa de Mando (CEO) ──
   const teamStats = useMemo(() => {
@@ -1273,45 +1350,162 @@ Aquí está la transcripción de la junta:
           {activeTab === 'juntas' && (
             <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
               
-              {/* Meeting List Sidebar */}
-              <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
-                <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0', fontWeight: 700, color: '#334155', fontSize: '0.9rem' }}>
-                  Historial de Sesiones ({meetings.length})
+              {/* Meeting List Sidebar (Google Calendar style) */}
+              <div style={{ background: 'white', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {/* Calendar Month Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderBottom: '1px solid #e2e8f0' }}>
+                  <button
+                    type="button"
+                    onClick={handlePrevMonth}
+                    disabled={currentCalendarMonth.getTime() <= calendarLimits.minMonth.getTime()}
+                    style={{
+                      border: '1px solid #cbd5e1',
+                      background: 'white',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      cursor: currentCalendarMonth.getTime() <= calendarLimits.minMonth.getTime() ? 'not-allowed' : 'pointer',
+                      opacity: currentCalendarMonth.getTime() <= calendarLimits.minMonth.getTime() ? 0.3 : 1
+                    }}
+                  >
+                    &lt;
+                  </button>
+                  <span style={{ fontWeight: 700, color: '#334155', fontSize: '0.85rem', textTransform: 'capitalize' }}>
+                    {currentCalendarMonth.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleNextMonth}
+                    disabled={currentCalendarMonth.getTime() >= calendarLimits.maxMonth.getTime()}
+                    style={{
+                      border: '1px solid #cbd5e1',
+                      background: 'white',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      cursor: currentCalendarMonth.getTime() >= calendarLimits.maxMonth.getTime() ? 'not-allowed' : 'pointer',
+                      opacity: currentCalendarMonth.getTime() >= calendarLimits.maxMonth.getTime() ? 0.3 : 1
+                    }}
+                  >
+                    &gt;
+                  </button>
                 </div>
-                <div style={{ maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
-                  {meetings.length === 0 ? (
-                    <div style={{ padding: '32px 16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>
-                      No hay reuniones registradas.
-                    </div>
-                  ) : (
-                    meetings.map(m => (
-                      <div
-                        key={m.id}
-                        onClick={() => setSelectedMeeting(m)}
-                        style={{
-                          padding: '16px',
-                          borderBottom: '1px solid #f1f5f9',
-                          cursor: 'pointer',
-                          background: selectedMeeting?.id === m.id ? '#f0f9ff' : 'transparent',
-                          borderLeft: selectedMeeting?.id === m.id ? '4px solid var(--primary-color)' : '4px solid transparent',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '0.875rem', marginBottom: '4px' }}>{m.title}</div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: '#64748b' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <Calendar size={12} />
-                            {m.date}
-                          </div>
-                          {m.summary && m.summary.tareas && m.summary.tareas.length > 0 && (
-                            <span style={{ background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: '999px', fontWeight: 600 }}>
-                              Analizada
-                            </span>
+
+                {/* Calendar Grid Container */}
+                <div style={{ padding: '12px' }}>
+                  {/* Days of Week Header */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', fontWeight: 600, color: '#94a3b8', fontSize: '0.75rem', marginBottom: '8px' }}>
+                    {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((wd, i) => (
+                      <div key={i}>{wd}</div>
+                    ))}
+                  </div>
+
+                  {/* Day Grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+                    {calendarDays.map((cell, idx) => {
+                      if (cell.type === 'empty') {
+                        return <div key={`empty-${idx}`} />;
+                      }
+
+                      const dayNum = cell.dayNum!;
+                      const dateStr = cell.dateStr!;
+                      const dayMeetings = meetingsByDate[dateStr] || [];
+                      const isSelected = selectedCalendarDay === dayNum;
+                      
+                      // Check if it is today
+                      const today = new Date();
+                      const isToday = today.getDate() === dayNum && 
+                                      today.getMonth() === currentCalendarMonth.getMonth() && 
+                                      today.getFullYear() === currentCalendarMonth.getFullYear();
+
+                      return (
+                        <div
+                          key={`day-${dayNum}`}
+                          onClick={() => {
+                            setSelectedCalendarDay(dayNum);
+                            if (dayMeetings.length > 0) {
+                              setSelectedMeeting(dayMeetings[0]);
+                            }
+                          }}
+                          style={{
+                            height: '36px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '0.8rem',
+                            fontWeight: isSelected ? 700 : 500,
+                            background: isSelected ? 'var(--primary-color)' : 'transparent',
+                            color: isSelected ? 'white' : '#334155',
+                            border: isToday ? '1px solid var(--primary-color)' : 'none',
+                            position: 'relative',
+                            transition: 'all 0.1s ease'
+                          }}
+                        >
+                          <span>{dayNum}</span>
+                          {/* Dot indicator if has meetings */}
+                          {dayMeetings.length > 0 && (
+                            <span style={{
+                              position: 'absolute',
+                              bottom: '3px',
+                              width: '4px',
+                              height: '4px',
+                              borderRadius: '50%',
+                              background: isSelected ? 'white' : 'var(--primary-color)'
+                            }} />
                           )}
                         </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Day meetings list */}
+                <div style={{ borderTop: '1px solid #e2e8f0', background: '#fafafa', flexGrow: 1, minHeight: '150px' }}>
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid #f1f5f9', fontWeight: 700, color: '#475569', fontSize: '0.75rem' }}>
+                    {selectedCalendarDay ? (
+                      <span>Juntas del {selectedCalendarDay} de {currentCalendarMonth.toLocaleDateString('es-MX', { month: 'long' })}:</span>
+                    ) : (
+                      <span>Selecciona un día en el calendario</span>
+                    )}
+                  </div>
+                  <div style={{ maxHeight: '200px', overflowY: 'auto', padding: '8px' }}>
+                    {selectedCalendarDay === null ? (
+                      <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.8rem' }}>
+                        Haz clic en un día del calendario para ver sus reuniones.
                       </div>
-                    ))
-                  )}
+                    ) : selectedDayMeetings.length === 0 ? (
+                      <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.8rem' }}>
+                        No hay juntas registradas para este día.
+                      </div>
+                    ) : (
+                      selectedDayMeetings.map(m => (
+                        <div
+                          key={m.id}
+                          onClick={() => setSelectedMeeting(m)}
+                          style={{
+                            padding: '10px 12px',
+                            borderRadius: '6px',
+                            background: selectedMeeting?.id === m.id ? '#eff6ff' : 'white',
+                            border: '1px solid',
+                            borderColor: selectedMeeting?.id === m.id ? '#cbd5e1' : '#e2e8f0',
+                            cursor: 'pointer',
+                            fontSize: '0.8rem',
+                            marginBottom: '6px',
+                            transition: 'all 0.1s ease'
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: '2px' }}>{m.title}</div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: '#64748b' }}>
+                            <span>Hora: {new Date(m.created_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</span>
+                            {m.summary && m.summary.tareas && m.summary.tareas.length > 0 && (
+                              <span style={{ color: '#16a34a', fontWeight: 600 }}>Analizada</span>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
 
