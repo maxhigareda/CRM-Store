@@ -63,6 +63,8 @@ const ROLE_FOCUS: Record<string, string> = {
   'Low Code Manager': 'Soluciones Internas - Automatizaciones y herramientas ágiles.'
 };
 
+declare const google: any;
+
 export default function LeadTeamMeetings() {
   const { showNotification } = useNotification();
 
@@ -88,6 +90,11 @@ export default function LeadTeamMeetings() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelLoadError, setModelLoadError] = useState<string | null>(null);
+
+  // Google Drive Integration States
+  const [googleClientId, setGoogleClientId] = useState(localStorage.getItem('crm_google_client_id') || '');
+  const [googleFolderId, setGoogleFolderId] = useState(localStorage.getItem('crm_google_folder_id') || '1tq57ZYomJ2dCRAlT8KhumARk3-TDYTac');
+  const [syncingDrive, setSyncingDrive] = useState(false);
 
   // Active / Selected Meeting Details (Pestaña Juntas)
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
@@ -222,8 +229,203 @@ export default function LeadTeamMeetings() {
   const handleSaveConfig = () => {
     localStorage.setItem('crm_gemini_api_key', geminiKey);
     localStorage.setItem('crm_gemini_model', geminiModel);
-    showNotification('success', 'Configuración de IA guardada correctamente.');
+    localStorage.setItem('crm_google_client_id', googleClientId);
+    localStorage.setItem('crm_google_folder_id', googleFolderId);
+    showNotification('success', 'Configuración guardada correctamente.');
     setShowConfigModal(false);
+  };
+
+  const handleSyncGoogleDrive = () => {
+    if (!googleClientId) {
+      showNotification('error', 'Por favor ingresa tu Google Client ID en la configuración (icono de engrane).');
+      setShowConfigModal(true);
+      return;
+    }
+
+    if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
+      showNotification('error', 'El servicio de Google Identity aún no se ha cargado. Reintenta en unos segundos.');
+      return;
+    }
+
+    setSyncingDrive(true);
+
+    const tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: googleClientId,
+      scope: 'https://www.googleapis.com/auth/drive.readonly',
+      callback: async (response: any) => {
+        if (response.error) {
+          showNotification('error', 'Error en autenticación de Google: ' + response.error);
+          setSyncingDrive(false);
+          return;
+        }
+
+        const accessToken = response.access_token;
+        try {
+          showNotification('info', 'Consultando carpeta de Google Drive...');
+
+          // Query items inside the folder
+          const query = encodeURIComponent(`'${googleFolderId}' in parents and trashed = false`);
+          const driveRes = await fetch(
+            `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,createdTime)&pageSize=100`,
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+
+          if (!driveRes.ok) {
+            const errData = await driveRes.json();
+            throw new Error(errData.error?.message || 'Error al listar archivos de Google Drive');
+          }
+
+          const driveData = await driveRes.json();
+          const items = driveData.files || [];
+
+          if (items.length === 0) {
+            showNotification('info', 'No se encontraron archivos en la carpeta de Google Drive.');
+            setSyncingDrive(false);
+            return;
+          }
+
+          let syncedCount = 0;
+
+          for (const item of items) {
+            // If it's a subfolder (e.g. Meet_-_yhj-pgfn-ujd - 25-8-2026)
+            if (item.mimeType === 'application/vnd.google-apps.folder') {
+              const subQuery = encodeURIComponent(`'${item.id}' in parents and trashed = false`);
+              const subRes = await fetch(
+                `https://www.googleapis.com/drive/v3/files?q=${subQuery}&fields=files(id,name,mimeType)&pageSize=20`,
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+              );
+
+              if (subRes.ok) {
+                const subData = await subRes.json();
+                const subFiles = subData.files || [];
+
+                // Look for Transcripcion or Minuta file
+                const transFile = subFiles.find((f: any) => f.name.toLowerCase().includes('transcrip')) ||
+                                  subFiles.find((f: any) => f.name.toLowerCase().includes('minuta')) ||
+                                  subFiles.find((f: any) => f.name.endsWith('.md'));
+
+                if (transFile) {
+                  // Download content
+                  const fileContentRes = await fetch(
+                    `https://www.googleapis.com/drive/v3/files/${transFile.id}?alt=media`,
+                    { headers: { Authorization: `Bearer ${accessToken}` } }
+                  );
+
+                  if (fileContentRes.ok) {
+                    const transcriptContent = await fileContentRes.text();
+                    
+                    // Parse date and title from item name or file name
+                    const parseTarget = item.name + ' ' + transFile.name;
+                    const clean = parseTarget.replace(/\.md$/i, '').replace(/\.txt$/i, '');
+                    
+                    // Date
+                    const dateMatch = clean.match(/(\d{1,2})[-_./](\d{1,2})[-_./](\d{4})/);
+                    let mDate = new Date().toISOString().slice(0, 10);
+                    if (dateMatch) {
+                      const d = dateMatch[1].padStart(2, '0');
+                      const m = dateMatch[2].padStart(2, '0');
+                      const y = dateMatch[3];
+                      mDate = `${y}-${m}-${d}`;
+                    }
+
+                    // Title
+                    const sessionMatch = clean.match(/Meet_-_([a-zA-Z0-9-]+)/i) || 
+                                         clean.match(/Meet_-([a-zA-Z0-9-]+)/i) || 
+                                         clean.match(/([a-zA-Z0-9]{3,4}-[a-zA-Z0-9]{3,4}-[a-zA-Z0-9]{3,4})/);
+                    let mTitle = `Meet - ${item.name}`;
+                    if (sessionMatch) {
+                      mTitle = `Meet - ${sessionMatch[1]}`;
+                    }
+
+                    // Check if already in Supabase
+                    const { data: existing } = await supabase
+                      .from('lead_team_meetings')
+                      .select('id')
+                      .eq('title', mTitle)
+                      .eq('date', mDate)
+                      .limit(1);
+
+                    if (!existing || existing.length === 0) {
+                      const { error: insertErr } = await supabase
+                        .from('lead_team_meetings')
+                        .insert({
+                          title: mTitle,
+                          date: mDate,
+                          transcript: transcriptContent,
+                          summary: {}
+                        });
+
+                      if (!insertErr) {
+                        syncedCount++;
+                      }
+                    }
+                  }
+                }
+              }
+            } else if (item.name.endsWith('.md') || item.name.endsWith('.txt')) {
+              // Direct markdown file in root folder
+              const fileContentRes = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${item.id}?alt=media`,
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+              );
+
+              if (fileContentRes.ok) {
+                const transcriptContent = await fileContentRes.text();
+                const clean = item.name.replace(/\.md$/i, '').replace(/\.txt$/i, '');
+                
+                const dateMatch = clean.match(/(\d{1,2})[-_./](\d{1,2})[-_./](\d{4})/);
+                let mDate = new Date().toISOString().slice(0, 10);
+                if (dateMatch) {
+                  const d = dateMatch[1].padStart(2, '0');
+                  const m = dateMatch[2].padStart(2, '0');
+                  const y = dateMatch[3];
+                  mDate = `${y}-${m}-${d}`;
+                }
+
+                const sessionMatch = clean.match(/Meet_-_([a-zA-Z0-9-]+)/i) || 
+                                     clean.match(/Meet_-([a-zA-Z0-9-]+)/i) || 
+                                     clean.match(/([a-zA-Z0-9]{3,4}-[a-zA-Z0-9]{3,4}-[a-zA-Z0-9]{3,4})/);
+                let mTitle = clean;
+                if (sessionMatch) {
+                  mTitle = `Meet - ${sessionMatch[1]}`;
+                }
+
+                const { data: existing } = await supabase
+                  .from('lead_team_meetings')
+                  .select('id')
+                  .eq('title', mTitle)
+                  .eq('date', mDate)
+                  .limit(1);
+
+                if (!existing || existing.length === 0) {
+                  const { error: insertErr } = await supabase
+                    .from('lead_team_meetings')
+                    .insert({
+                      title: mTitle,
+                      date: mDate,
+                      transcript: transcriptContent,
+                      summary: {}
+                    });
+
+                  if (!insertErr) {
+                    syncedCount++;
+                  }
+                }
+              }
+            }
+          }
+
+          showNotification('success', `¡Sincronización completada! ${syncedCount} nuevas reuniones importadas de Google Drive.`);
+          await fetchInitialData();
+        } catch (err: any) {
+          showNotification('error', 'Error al sincronizar Google Drive: ' + err.message);
+        } finally {
+          setSyncingDrive(false);
+        }
+      }
+    });
+
+    tokenClient.requestAccessToken({ prompt: 'consent' });
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -866,12 +1068,21 @@ Aquí está la transcripción de la junta:
 
         <div style={{ display: 'flex', gap: '10px' }}>
           <button
+            onClick={handleSyncGoogleDrive}
+            disabled={syncingDrive}
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#eff6ff', borderColor: '#bfdbfe', color: '#1d4ed8' }}
+          >
+            {syncingDrive ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            Sincronizar Google Drive
+          </button>
+          <button
             onClick={() => setShowConfigModal(true)}
             className="btn btn-secondary"
             style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
           >
             <Settings size={16} />
-            Configurar IA
+            Configuración
           </button>
           <button
             onClick={() => setShowFormModal(true)}
@@ -1991,58 +2202,90 @@ Aquí está la transcripción de la junta:
             gap: '16px'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
-              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' }}>Configurar API de Gemini</h3>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' }}>Configuración del Sistema</h3>
               <button onClick={() => setShowConfigModal(false)} style={{ border: 'none', background: 'transparent', fontSize: '1.25rem', cursor: 'pointer', color: '#94a3b8' }}>×</button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>API KEY DE GOOGLE AI STUDIO</label>
-              <input
-                type="password"
-                value={geminiKey}
-                onChange={(e) => {
-                  setGeminiKey(e.target.value);
-                  if (e.target.value) fetchAvailableModels(e.target.value);
-                }}
-                placeholder="Pega tu API Key de Gemini..."
-                style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-              />
+            {/* Google Drive Integration */}
+            <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary-color)' }}>INTEGRACIÓN CON GOOGLE DRIVE</span>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>GOOGLE CLIENT ID (OAuth 2.0)</label>
+                <input
+                  type="text"
+                  value={googleClientId}
+                  onChange={(e) => setGoogleClientId(e.target.value)}
+                  placeholder="Ej. 123456789-abc.apps.googleusercontent.com"
+                  style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>ID DE CARPETA DE GOOGLE DRIVE</label>
+                <input
+                  type="text"
+                  value={googleFolderId}
+                  onChange={(e) => setGoogleFolderId(e.target.value)}
+                  placeholder="1tq57ZYomJ2dCRAlT8KhumARk3-TDYTac"
+                  style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                />
+              </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>MODELO SELECCIONADO</label>
-              {loadingModels ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#64748b', padding: '8px 0' }}>
-                  <Loader2 className="animate-spin" size={14} /> Cargando modelos disponibles de tu cuenta...
-                </div>
-              ) : modelLoadError ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div style={{ fontSize: '0.75rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <AlertCircle size={14} /> Error al consultar modelos: {modelLoadError}
+            {/* Gemini AI Config */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary-color)' }}>GOOGLE GEMINI AI</span>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>API KEY DE GOOGLE AI STUDIO</label>
+                <input
+                  type="password"
+                  value={geminiKey}
+                  onChange={(e) => {
+                    setGeminiKey(e.target.value);
+                    if (e.target.value) fetchAvailableModels(e.target.value);
+                  }}
+                  placeholder="Pega tu API Key de Gemini..."
+                  style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>MODELO SELECCIONADO</label>
+                {loadingModels ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: '#64748b', padding: '8px 0' }}>
+                    <Loader2 className="animate-spin" size={14} /> Cargando modelos disponibles de tu cuenta...
                   </div>
-                  <input
-                    type="text"
+                ) : modelLoadError ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <AlertCircle size={14} /> Error al consultar modelos: {modelLoadError}
+                    </div>
+                    <input
+                      type="text"
+                      value={geminiModel}
+                      onChange={(e) => setGeminiModel(e.target.value)}
+                      placeholder="Escribe el modelo (ej: gemini-1.5-flash)"
+                      style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                    />
+                  </div>
+                ) : (
+                  <select
                     value={geminiModel}
                     onChange={(e) => setGeminiModel(e.target.value)}
-                    placeholder="Escribe el modelo (ej: gemini-1.5-flash)"
-                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                  />
-                </div>
-              ) : (
-                <select
-                  value={geminiModel}
-                  onChange={(e) => setGeminiModel(e.target.value)}
-                  style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', outline: 'none' }}
-                >
-                  {availableModels.length === 0 ? (
-                    <option value="gemini-1.5-flash">gemini-1.5-flash (predeterminado)</option>
-                  ) : (
-                    availableModels.map(m => (
-                      <option key={m} value={m}>{m}</option>
-                    ))
-                  )}
-                </select>
-              )}
+                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', outline: 'none' }}
+                  >
+                    {availableModels.length === 0 ? (
+                      <option value="gemini-1.5-flash">gemini-1.5-flash (predeterminado)</option>
+                    ) : (
+                      availableModels.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))
+                    )}
+                  </select>
+                )}
+              </div>
             </div>
 
             <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
