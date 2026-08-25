@@ -1155,12 +1155,12 @@ export default function Flujos() {
 {
   "flow_id": "TU_FLOW_ID",
   "client_id": "TU_CLIENT_ID",
-  "execution_id": "{{ $execution.id }}",
+  "execution_id": "={{ $execution.id }}",
   "status": "running",
   "step_current": 1,
   "step_total": 3,
   "step_name": "Iniciando proceso",
-  "started_at": "{{ $now.toISOString() }}"
+  "started_at": "={{ $now.toISO() }}"
 }`}
               </pre>
             </div>
@@ -1173,12 +1173,12 @@ export default function Flujos() {
 {
   "flow_id": "TU_FLOW_ID",
   "client_id": "TU_CLIENT_ID",
-  "execution_id": "{{ $execution.id }}",
+  "execution_id": "={{ $execution.id }}",
   "status": "success",
   "step_current": 3,
   "step_total": 3,
   "step_name": "Proceso completado exitosamente",
-  "finished_at": "{{ $now.toISOString() }}"
+  "finished_at": "={{ $now.toISO() }}"
 }`}
               </pre>
             </div>
@@ -1195,7 +1195,7 @@ export default function Flujos() {
   "status": "error",
   "error_log": "={{ $json.error?.message || $json.message || $json.error || $execution.error?.message || (typeof $json === 'string' ? $json : JSON.stringify($json)) }}",
   "payload_output": "={{ $json }}",
-  "finished_at": "={{ $now.toISOString() }}"
+  "finished_at": "={{ $now.toISO() }}"
 }`}
               </pre>
             </div>
