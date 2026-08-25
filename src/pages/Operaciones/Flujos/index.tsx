@@ -1076,8 +1076,8 @@ export default function Flujos() {
             </p>
 
             {/* Endpoint details */}
-            <div style={{ background: '#f8fafc', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>ENDPOINT REST DE SUPABASE</div>
+            <div style={{ background: '#f8fafc', padding: '14px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>1. URL DEL ENDPOINT REST (SUPABASE)</div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0f172a', padding: '8px 12px', borderRadius: '6px', color: '#38bdf8', fontSize: '0.8rem', fontFamily: 'monospace' }}>
                 <span>POST {restEndpoint}</span>
                 <button
@@ -1086,6 +1086,25 @@ export default function Flujos() {
                 >
                   {copiedKey === 'endpoint' ? <Check size={14} color="#4ade80" /> : <Copy size={14} />}
                 </button>
+              </div>
+
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginTop: '4px' }}>2. HEADERS OBLIGATORIOS EN N8N</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.75rem', fontFamily: 'monospace' }}>
+                <div style={{ background: '#f1f5f9', padding: '6px 10px', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span><strong>apikey:</strong> eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</span>
+                  <button
+                    onClick={() => handleCopy('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp6cm5wdWVmdXh2bmhraXBqeHFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NzQ2NzQsImV4cCI6MjA5MjU1MDY3NH0.0p9l8Fl0iTdL7pxxLFtGEo5HtZXruCnkhQktqTjgghQ', 'anonkey')}
+                    style={{ border: 'none', background: 'transparent', color: '#64748b', cursor: 'pointer' }}
+                  >
+                    {copiedKey === 'anonkey' ? <Check size={14} color="#16a34a" /> : <Copy size={14} />}
+                  </button>
+                </div>
+                <div style={{ background: '#f1f5f9', padding: '6px 10px', borderRadius: '6px' }}>
+                  <span><strong>Authorization:</strong> Bearer eyJhbGciOiJIUzI1Ni...</span>
+                </div>
+                <div style={{ background: '#f1f5f9', padding: '6px 10px', borderRadius: '6px' }}>
+                  <span><strong>Content-Type:</strong> application/json</span>
+                </div>
               </div>
             </div>
 
