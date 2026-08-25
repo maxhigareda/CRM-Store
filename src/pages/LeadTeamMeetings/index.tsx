@@ -263,23 +263,26 @@ export default function LeadTeamMeetings() {
         try {
           showNotification('info', 'Consultando carpeta de Google Drive...');
 
-          // Query items inside the folder
+          // Query items inside the folder (with Shared Drives support)
+          console.log('[Google Drive] Buscando en carpeta:', googleFolderId);
           const query = encodeURIComponent(`'${googleFolderId}' in parents and trashed = false`);
           const driveRes = await fetch(
-            `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,createdTime)&pageSize=100`,
+            `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,createdTime)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`,
             { headers: { Authorization: `Bearer ${accessToken}` } }
           );
 
           if (!driveRes.ok) {
             const errData = await driveRes.json();
+            console.error('[Google Drive] Error al listar carpeta:', errData);
             throw new Error(errData.error?.message || 'Error al listar archivos de Google Drive');
           }
 
           const driveData = await driveRes.json();
           const items = driveData.files || [];
+          console.log('[Google Drive] Elementos encontrados en la carpeta:', items);
 
           if (items.length === 0) {
-            showNotification('info', 'No se encontraron archivos en la carpeta de Google Drive.');
+            showNotification('info', 'No se encontraron archivos en la carpeta de Google Drive configurada.');
             setSyncingDrive(false);
             return;
           }
@@ -291,13 +294,14 @@ export default function LeadTeamMeetings() {
             if (item.mimeType === 'application/vnd.google-apps.folder') {
               const subQuery = encodeURIComponent(`'${item.id}' in parents and trashed = false`);
               const subRes = await fetch(
-                `https://www.googleapis.com/drive/v3/files?q=${subQuery}&fields=files(id,name,mimeType)&pageSize=20`,
+                `https://www.googleapis.com/drive/v3/files?q=${subQuery}&fields=files(id,name,mimeType)&pageSize=20&supportsAllDrives=true&includeItemsFromAllDrives=true`,
                 { headers: { Authorization: `Bearer ${accessToken}` } }
               );
 
               if (subRes.ok) {
                 const subData = await subRes.json();
                 const subFiles = subData.files || [];
+                console.log(`[Google Drive] Archivos en subcarpeta "${item.name}":`, subFiles);
 
                 // Look for Transcripcion or Minuta file
                 const transFile = subFiles.find((f: any) => f.name.toLowerCase().includes('transcrip')) ||
@@ -307,7 +311,7 @@ export default function LeadTeamMeetings() {
                 if (transFile) {
                   // Download content
                   const fileContentRes = await fetch(
-                    `https://www.googleapis.com/drive/v3/files/${transFile.id}?alt=media`,
+                    `https://www.googleapis.com/drive/v3/files/${transFile.id}?alt=media&supportsAllDrives=true`,
                     { headers: { Authorization: `Bearer ${accessToken}` } }
                   );
 
@@ -365,7 +369,7 @@ export default function LeadTeamMeetings() {
             } else if (item.name.endsWith('.md') || item.name.endsWith('.txt')) {
               // Direct markdown file in root folder
               const fileContentRes = await fetch(
-                `https://www.googleapis.com/drive/v3/files/${item.id}?alt=media`,
+                `https://www.googleapis.com/drive/v3/files/${item.id}?alt=media&supportsAllDrives=true`,
                 { headers: { Authorization: `Bearer ${accessToken}` } }
               );
 
