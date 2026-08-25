@@ -773,20 +773,46 @@ export default function Flujos() {
                   )}
 
                   {/* Error Snippet Box if Failed */}
-                  {isError && exec?.error_log && (
-                    <div style={{ marginTop: '10px', padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#b91c1c', fontSize: '0.8rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <AlertCircle size={15} style={{ flexShrink: 0 }} />
-                        <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {exec.error_log}
-                        </span>
+                  {isError && (exec?.error_log || exec?.payload_output?.error || exec?.payload_output?.message) && (
+                    <div style={{
+                      marginTop: '12px',
+                      padding: '12px 14px',
+                      background: '#fff1f2',
+                      border: '1px solid #fecdd3',
+                      borderRadius: '10px',
+                      color: '#9f1239',
+                      fontSize: '0.825rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, color: '#e11d48', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                          <AlertCircle size={15} />
+                          Error en Salida / Output N8N:
+                        </div>
+                        <button
+                          onClick={() => handleOpenLogs(flow)}
+                          style={{ border: 'none', background: '#ffe4e6', color: '#be123c', padding: '3px 8px', borderRadius: '6px', fontWeight: 700, cursor: 'pointer', fontSize: '0.75rem' }}
+                        >
+                          Ver Bitácora / Payloads →
+                        </button>
                       </div>
-                      <button
-                        onClick={() => handleOpenLogs(flow)}
-                        style={{ border: 'none', background: 'transparent', color: '#dc2626', fontWeight: 700, cursor: 'pointer', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
-                      >
-                        Ver detalle →
-                      </button>
+                      <div style={{
+                        fontFamily: 'monospace',
+                        background: '#881337',
+                        color: '#ffe4e6',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        fontSize: '0.8rem',
+                        lineHeight: 1.45,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        maxHeight: '140px',
+                        overflowY: 'auto'
+                      }}>
+                        {exec.error_log || (typeof exec.payload_output === 'string' ? exec.payload_output : JSON.stringify(exec.payload_output?.error || exec.payload_output, null, 2))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -992,10 +1018,23 @@ export default function Flujos() {
                       </div>
 
                       {/* Error log if present */}
-                      {isErr && exec.error_log && (
-                        <div style={{ background: '#7f1d1d', color: '#fecaca', padding: '10px 12px', borderRadius: '8px', fontSize: '0.75rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                          <strong>Mensaje de Error:</strong>
-                          <div style={{ marginTop: '4px' }}>{exec.error_log}</div>
+                      {isErr && (exec.error_log || exec.payload_output?.error || exec.payload_output?.message) && (
+                        <div style={{ background: '#7f1d1d', color: '#fecaca', padding: '12px 14px', borderRadius: '8px', fontSize: '0.8rem', fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', border: '1px solid #991b1b' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                            <strong style={{ color: '#fca5a5', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <AlertCircle size={14} /> Log del Error / Output:
+                            </strong>
+                            <button
+                              onClick={() => handleCopy(exec.error_log || JSON.stringify(exec.payload_output?.error || exec.payload_output, null, 2), `err-${exec.id}`)}
+                              style={{ border: 'none', background: '#991b1b', color: '#fee2e2', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            >
+                              {copiedKey === `err-${exec.id}` ? <Check size={12} color="#86efac" /> : <Copy size={12} />}
+                              {copiedKey === `err-${exec.id}` ? 'Copiado' : 'Copiar'}
+                            </button>
+                          </div>
+                          <div style={{ color: '#ffffff', lineHeight: 1.45 }}>
+                            {exec.error_log || (typeof exec.payload_output === 'string' ? exec.payload_output : JSON.stringify(exec.payload_output?.error || exec.payload_output, null, 2))}
+                          </div>
                         </div>
                       )}
 
@@ -1144,7 +1183,7 @@ export default function Flujos() {
               </pre>
             </div>
 
-            {/* Snippet 3: En Caso de Error (Error Trigger) */}
+            {/* Snippet 3: En Caso de Error (Error Trigger / Catch) */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#dc2626' }}>3. Nodo Error Trigger: En Caso de Fallo (Status: error)</div>
               <pre style={{ background: '#450a0a', color: '#fca5a5', padding: '12px', borderRadius: '8px', fontSize: '0.75rem', overflowX: 'auto', margin: 0 }}>
@@ -1152,10 +1191,11 @@ export default function Flujos() {
 {
   "flow_id": "TU_FLOW_ID",
   "client_id": "TU_CLIENT_ID",
-  "execution_id": "{{ $execution.id }}",
+  "execution_id": "={{ $execution.id }}",
   "status": "error",
-  "error_log": "{{ $json.error?.message || 'Error en ejecución de N8N' }}",
-  "finished_at": "{{ $now.toISOString() }}"
+  "error_log": "={{ $json.error?.message || $json.message || $json.error || $execution.error?.message || (typeof $json === 'string' ? $json : JSON.stringify($json)) }}",
+  "payload_output": "={{ $json }}",
+  "finished_at": "={{ $now.toISOString() }}"
 }`}
               </pre>
             </div>
