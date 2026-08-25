@@ -209,6 +209,46 @@ export default function LeadTeamMeetings() {
     setShowConfigModal(false);
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Helper to parse filename
+    const clean = file.name.replace(/\.md$/i, '');
+    
+    // Extract date (dd-mm-yyyy or similar)
+    const dateMatch = clean.match(/(\d{1,2})-(\d{1,2})-(\d{4})/);
+    if (dateMatch) {
+      const d = dateMatch[1].padStart(2, '0');
+      const m = dateMatch[2].padStart(2, '0');
+      const y = dateMatch[3];
+      setDate(`${y}-${m}-${d}`);
+    }
+
+    // Extract session code
+    const sessionMatch = clean.match(/Meet_-_([a-z0-9-]+)/i) || 
+                         clean.match(/Meet_-([a-z0-9-]+)/i) || 
+                         clean.match(/([a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3})/i);
+    if (sessionMatch) {
+      setTitle(`Meet - ${sessionMatch[1]}`);
+    } else {
+      // Use clean filename as fallback title, removing prefixes
+      const fallbackTitle = clean.replace(/^(Minuta|Transcripcion)_Meet_-?_/i, 'Meet - ');
+      setTitle(fallbackTitle);
+    }
+
+    // Read content
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      if (text) {
+        setTranscript(text);
+        showNotification('success', `Archivo "${file.name}" cargado y campos autocompletados.`);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handleSaveMeeting = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !date) return;
@@ -1744,6 +1784,34 @@ Aquí está la transcripción de la junta:
             </div>
 
             <form onSubmit={handleSaveMeeting} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
+              {/* File Upload Dropzone */}
+              <div style={{
+                border: '2px dashed #cbd5e1',
+                borderRadius: '8px',
+                padding: '20px',
+                textAlign: 'center',
+                background: '#f8fafc',
+                cursor: 'pointer',
+                transition: 'border-color 0.15s ease'
+              }}>
+                <input
+                  type="file"
+                  accept=".md,.txt"
+                  onChange={handleFileChange}
+                  style={{ display: 'none' }}
+                  id="meeting-file-upload"
+                />
+                <label htmlFor="meeting-file-upload" style={{ cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                  <FileText size={32} color="#64748b" />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
+                    Cargar archivo de Transcripción o Minuta (.md)
+                  </span>
+                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                    Se autocompletarán la fecha, el título y el contenido
+                  </span>
+                </label>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 150px', gap: '16px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>TÍTULO DE JUNTA</label>
