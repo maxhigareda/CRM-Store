@@ -118,6 +118,7 @@
 .comercial-bg { background: linear-gradient(135deg, #f59e0b, #ef4444); }
 .proyectos-bg { background: linear-gradient(135deg, #3b82f6, #6366f1); }
 .financiero-bg { background: linear-gradient(135deg, #10b981, #059669); }
+.operaciones-bg { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
 
 .module-card:hover .card-bg {
   opacity: 0.15;
@@ -152,6 +153,7 @@
 .comercial-icon { color: #f59e0b; }
 .proyectos-icon { color: #3b82f6; }
 .financiero-icon { color: #10b981; }
+.operaciones-icon { color: #8b5cf6; }
 
 .module-card h3 {
   font-size: 1.5rem;
@@ -192,6 +194,7 @@
 .module-card:hover .comercial-icon ~ .card-footer .action-text { color: #f59e0b; }
 .module-card:hover .proyectos-icon ~ .card-footer .action-text { color: #3b82f6; }
 .module-card:hover .financiero-icon ~ .card-footer .action-text { color: #10b981; }
+.module-card:hover .operaciones-icon ~ .card-footer .action-text { color: #8b5cf6; }
 
 /* Estado Deshabilitado */
 .module-card.disabled {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { Briefcase, Building2, LayoutDashboard, ChevronRight } from 'lucide-react';
+import { Briefcase, Building2, LayoutDashboard, ChevronRight, Workflow } from 'lucide-react';
 import './home.css';
 
 export default function Home() {
@@ -22,6 +22,8 @@ export default function Home() {
           navigate('/comercial', { replace: true });
         } else if (moduleName === 'financiero') {
           navigate('/financiero', { replace: true });
+        } else if (moduleName === 'operaciones') {
+          navigate('/operaciones', { replace: true });
         } else {
           // Fallback por si la cadena no coincide exactamente
           navigate('/projects', { replace: true });
@@ -46,6 +48,7 @@ export default function Home() {
   const hasProyectos = userModules.includes('proyectos');
   const hasComercial = userModules.includes('comercial');
   const hasFinanciero = userModules.includes('financiero');
+  const hasOperaciones = userModules.includes('operaciones') || profile?.role === 'admin';
 
   return (
     <div className="home-container">
@@ -124,6 +127,29 @@ export default function Home() {
               
               <div className="card-footer">
                 {!hasFinanciero ? (
+                  <span className="badge-locked">Sin acceso</span>
+                ) : (
+                  <span className="action-text">Entrar <ChevronRight size={16} /></span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Módulo Operaciones */}
+          <div 
+            className={`module-card ${!hasOperaciones ? 'disabled' : ''}`}
+            onClick={() => hasOperaciones ? navigate('/operaciones') : null}
+          >
+            <div className="card-bg operaciones-bg"></div>
+            <div className="card-content">
+              <div className="icon-wrapper operaciones-icon">
+                <Workflow size={32} />
+              </div>
+              <h3>Operaciones</h3>
+              <p>Monitoreo y trazabilidad de flujos automatizados de N8N por cliente.</p>
+              
+              <div className="card-footer">
+                {!hasOperaciones ? (
                   <span className="badge-locked">Sin acceso</span>
                 ) : (
                   <span className="action-text">Entrar <ChevronRight size={16} /></span>

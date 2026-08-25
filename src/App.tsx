@@ -3,6 +3,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import Layout from './components/Layout';
 import FinancieroLayout from './components/FinancieroLayout';
+import OperacionesLayout from './components/OperacionesLayout';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
 import Projects from './pages/Projects';
@@ -14,6 +15,7 @@ import Clients from './pages/Clients';
 import Tags from './pages/Tags';
 import Home from './pages/Home';
 import LeadTeamMeetings from './pages/LeadTeamMeetings';
+import Flujos from './pages/Operaciones/Flujos';
 import Dashboard from './pages/Financiero/Dashboard';
 import FacturasTabla from './pages/Financiero/Tablas/Facturas';
 import Conciliacion from './pages/Financiero/Conciliacion';
@@ -40,6 +42,16 @@ function App() {
               <Route path="clients" element={<Clients />} />
               <Route path="tags" element={<Tags />} />
               <Route path="lead-team-meetings" element={<LeadTeamMeetings />} />
+            </Route>
+
+            <Route path="operaciones" element={<OperacionesLayout />}>
+              <Route index element={<Navigate to="flujos" replace />} />
+              <Route path="flujos" element={<Flujos />} />
+              <Route path="collaborators" element={<Collaborators />} />
+              <Route path="plan-trabajo" element={<PlanTrabajo />} />
+              <Route path="clients" element={<Clients />} />
+              <Route path="admin" element={<Admin />} />
+              <Route path="tags" element={<Tags />} />
             </Route>
 
             <Route path="financiero" element={<FinancieroLayout />}>
