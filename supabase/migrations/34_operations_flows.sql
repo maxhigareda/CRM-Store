@@ -38,11 +38,15 @@ CREATE INDEX IF NOT EXISTS idx_flow_executions_started_at ON public.flow_executi
 ALTER TABLE public.operation_flows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.flow_executions ENABLE ROW LEVEL SECURITY;
 
--- 5. Políticas RLS para usuarios autenticados y webhooks con anon key
+-- 5. Políticas RLS permisivas con WITH CHECK para CRUD de usuarios y webhooks
 DROP POLICY IF EXISTS "Manage operation flows" ON public.operation_flows;
 CREATE POLICY "Manage operation flows" ON public.operation_flows
-    FOR ALL USING (auth.role() = 'authenticated' OR auth.role() = 'anon');
+    FOR ALL
+    USING (true)
+    WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Manage flow executions" ON public.flow_executions;
 CREATE POLICY "Manage flow executions" ON public.flow_executions
-    FOR ALL USING (auth.role() = 'authenticated' OR auth.role() = 'anon');
+    FOR ALL
+    USING (true)
+    WITH CHECK (true);

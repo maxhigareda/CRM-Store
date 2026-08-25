@@ -24,7 +24,13 @@ import { ConfirmModal } from '../../../components/Modals';
 interface Client {
   id: string;
   name: string;
+  reference_name?: string;
 }
+
+export const getClientDisplayName = (client?: { name?: string; reference_name?: string } | null) => {
+  if (!client) return 'Cliente';
+  return client.reference_name || client.name || 'Cliente';
+};
 
 interface FlowExecution {
   id: string;
@@ -96,8 +102,8 @@ export default function Flujos() {
       // 1. Fetch Clients
       const { data: clientsData, error: clientsErr } = await supabase
         .from('clients')
-        .select('id, name')
-        .order('name');
+        .select('id, name, reference_name')
+        .order('reference_name', { ascending: true });
 
       if (clientsErr) throw clientsErr;
       setClients(clientsData || []);
@@ -107,7 +113,7 @@ export default function Flujos() {
         .from('operation_flows')
         .select(`
           *,
-          client:clients(id, name)
+          client:clients(id, name, reference_name)
         `)
         .order('created_at', { ascending: false });
 
@@ -284,7 +290,7 @@ export default function Flujos() {
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       const matchName = flow.name.toLowerCase().includes(query);
-      const matchClient = flow.client?.name.toLowerCase().includes(query);
+      const matchClient = (flow.client?.reference_name || flow.client?.name || '').toLowerCase().includes(query);
       const matchDesc = flow.description?.toLowerCase().includes(query);
       if (!matchName && !matchClient && !matchDesc) return false;
     }
@@ -453,7 +459,7 @@ export default function Flujos() {
             >
               <option value="all">🏢 Todos los Clientes ({clients.length})</option>
               {clients.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+                <option key={c.id} value={c.id}>{getClientDisplayName(c)}</option>
               ))}
             </select>
           </div>
@@ -615,7 +621,7 @@ export default function Flujos() {
                           gap: '4px'
                         }}>
                           <Building2 size={12} />
-                          {flow.client?.name || 'Cliente'}
+                          {getClientDisplayName(flow.client)}
                         </span>
                         {flow.status === 'paused' && (
                           <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '2px 6px', borderRadius: '6px', background: '#fef3c7', color: '#b45309' }}>
@@ -843,7 +849,7 @@ export default function Flujos() {
                 >
                   <option value="">-- Selecciona un Cliente --</option>
                   {clients.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                    <option key={c.id} value={c.id}>{getClientDisplayName(c)}</option>
                   ))}
                 </select>
               </div>
@@ -912,7 +918,7 @@ export default function Flujos() {
                   <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>Bitácora de Ejecuciones</h3>
                 </div>
                 <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: '#64748b' }}>
-                  Flujo: <strong>{selectedFlowForLogs.name}</strong> • {selectedFlowForLogs.client?.name}
+                  Flujo: <strong>{selectedFlowForLogs.name}</strong> • {getClientDisplayName(selectedFlowForLogs.client)}
                 </p>
                 <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#8b5cf6', fontFamily: 'monospace' }}>
                   Flow ID: {selectedFlowForLogs.id}
