@@ -166,6 +166,19 @@ export default function LeadTeamMeetings() {
       setExtractedTasks([]);
     }
     setShowTranscript(false);
+
+    // Sync calendar month/day when a meeting is selected
+    if (selectedMeeting && selectedMeeting.date) {
+      const parts = selectedMeeting.date.split('-');
+      if (parts.length === 3) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1; // 0-indexed
+        const day = parseInt(parts[2], 10);
+        
+        setCurrentCalendarMonth(new Date(year, month, 1));
+        setSelectedCalendarDay(day);
+      }
+    }
   }, [selectedMeeting, projects]);
 
   const fetchAvailableModels = async (key: string) => {
@@ -214,10 +227,10 @@ export default function LeadTeamMeetings() {
     if (!file) return;
 
     // Helper to parse filename
-    const clean = file.name.replace(/\.md$/i, '');
+    const clean = file.name.replace(/\.md$/i, '').replace(/\.txt$/i, '');
     
-    // Extract date (dd-mm-yyyy or similar)
-    const dateMatch = clean.match(/(\d{1,2})-(\d{1,2})-(\d{4})/);
+    // Extract date (dd-mm-yyyy or similar, allowing hyphens, underscores, dots, or slashes)
+    const dateMatch = clean.match(/(\d{1,2})[-_./](\d{1,2})[-_./](\d{4})/);
     if (dateMatch) {
       const d = dateMatch[1].padStart(2, '0');
       const m = dateMatch[2].padStart(2, '0');
@@ -225,10 +238,10 @@ export default function LeadTeamMeetings() {
       setDate(`${y}-${m}-${d}`);
     }
 
-    // Extract session code
-    const sessionMatch = clean.match(/Meet_-_([a-z0-9-]+)/i) || 
-                         clean.match(/Meet_-([a-z0-9-]+)/i) || 
-                         clean.match(/([a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3})/i);
+    // Extract session code (case-insensitive, allowing alphanumeric and dashes)
+    const sessionMatch = clean.match(/Meet_-_([a-zA-Z0-9-]+)/i) || 
+                         clean.match(/Meet_-([a-zA-Z0-9-]+)/i) || 
+                         clean.match(/([a-zA-Z0-9]{3,4}-[a-zA-Z0-9]{3,4}-[a-zA-Z0-9]{3,4})/);
     if (sessionMatch) {
       setTitle(`Meet - ${sessionMatch[1]}`);
     } else {
