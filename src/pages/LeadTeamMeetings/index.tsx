@@ -103,6 +103,10 @@ export default function LeadTeamMeetings() {
   });
   const [selectedCalendarDay, setSelectedCalendarDay] = useState<number | null>(null);
 
+  // Diagnostics State
+  const [diagResult, setDiagResult] = useState<string | null>(null);
+  const [runningDiag, setRunningDiag] = useState(false);
+
   // Bóveda de Conocimiento Selected Node Details
   const [selectedNode, setSelectedNode] = useState<{
     id: string;
@@ -287,6 +291,58 @@ export default function LeadTeamMeetings() {
       showNotification('error', 'Error al guardar reunión: ' + err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const runDatabaseDiagnostics = async () => {
+    setRunningDiag(true);
+    setDiagResult(null);
+    const logs: string[] = [];
+    try {
+      logs.push(`Iniciando diagnóstico en ${new Date().toLocaleString('es-MX')}...`);
+      
+      const { data: { session }, error: authErr } = await supabase.auth.getSession();
+      if (authErr) {
+        logs.push(`[ERROR AUTH] Al obtener sesión: ${authErr.message}`);
+      } else {
+        logs.push(`Sesión activa: ${session ? 'SÍ' : 'NO'}`);
+        if (session) {
+          logs.push(`Usuario: ${session.user.email} (ID: ${session.user.id}, Rol: ${session.user.role})`);
+        }
+      }
+
+      logs.push('Consultando tabla "lead_team_meetings"...');
+      const meetingsTest = await supabase.from('lead_team_meetings').select('id, title, date, created_at');
+      if (meetingsTest.error) {
+        logs.push(`[ERROR MEETING SELECT] ${meetingsTest.error.code} - ${meetingsTest.error.message}`);
+      } else {
+        logs.push(`[ÉXITO] Tabla "lead_team_meetings" consultada. Registros encontrados: ${meetingsTest.data.length}`);
+        meetingsTest.data.forEach((m: any, idx: number) => {
+          logs.push(`  ${idx + 1}. ID: ${m.id} | Título: "${m.title}" | Fecha: ${m.date} | Creada: ${m.created_at}`);
+        });
+      }
+
+      logs.push('Consultando tabla "lead_team_tasks"...');
+      const tasksTest = await supabase.from('lead_team_tasks').select('id, title, status');
+      if (tasksTest.error) {
+        logs.push(`[ERROR TASK SELECT] ${tasksTest.error.code} - ${tasksTest.error.message}`);
+      } else {
+        logs.push(`[ÉXITO] Tabla "lead_team_tasks" consultada. Registros encontrados: ${tasksTest.data.length}`);
+      }
+
+      logs.push('Consultando tabla general "projects"...');
+      const projectsTest = await supabase.from('projects').select('id, name').limit(3);
+      if (projectsTest.error) {
+        logs.push(`[ERROR PROJECTS SELECT] ${projectsTest.error.code} - ${projectsTest.error.message}`);
+      } else {
+        logs.push(`[ÉXITO] Tabla "projects" consultada. Registros encontrados: ${projectsTest.data.length}`);
+      }
+
+    } catch (err: any) {
+      logs.push(`[ERROR GENERAL] ${err.message}`);
+    } finally {
+      setDiagResult(logs.join('\n'));
+      setRunningDiag(false);
     }
   };
 
@@ -1761,7 +1817,39 @@ Aquí está la transcripción de la junta:
                   <div style={{ background: 'white', borderRadius: '12px', border: '1px dashed #cbd5e1', padding: '60px 20px', textAlign: 'center', color: '#94a3b8' }}>
                     <FileText size={48} style={{ margin: '0 auto 16px auto', opacity: 0.5 }} />
                     <h3 style={{ margin: 0, color: '#475569' }}>Ninguna sesión seleccionada</h3>
-                    <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem' }}>Selecciona una junta del historial a la izquierda o registra una nueva junta.</p>
+                    <p style={{ margin: '4px 0 16px 0', fontSize: '0.85rem' }}>Selecciona una junta del historial a la izquierda o registra una nueva junta.</p>
+                    
+                    {/* Database Diagnostic Tool */}
+                    <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '20px', marginTop: '20px', maxWidth: '400px', marginInline: 'auto' }}>
+                      <button
+                        type="button"
+                        onClick={runDatabaseDiagnostics}
+                        disabled={runningDiag}
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.8rem', padding: '6px 12px', width: '100%' }}
+                      >
+                        {runningDiag ? <Loader2 size={14} className="animate-spin" style={{ display: 'inline', marginRight: '6px' }} /> : null}
+                        Probar Conexión con Supabase (Diagnóstico)
+                      </button>
+                      {diagResult && (
+                        <pre style={{
+                          textAlign: 'left',
+                          background: '#f8fafc',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '8px',
+                          padding: '12px',
+                          marginTop: '12px',
+                          fontSize: '0.7rem',
+                          color: '#334155',
+                          overflowX: 'auto',
+                          whiteSpace: 'pre-wrap',
+                          maxHeight: '200px',
+                          fontFamily: 'monospace'
+                        }}>
+                          {diagResult}
+                        </pre>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
