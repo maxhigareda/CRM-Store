@@ -326,8 +326,8 @@ export default function Admin() {
                     </select>
                   </td>
                   <td style={{ padding: '16px 20px' }}>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', width: '140px' }}>
-                      {['comercial', 'financiero', 'proyectos'].map(mod => {
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', minWidth: '180px' }}>
+                      {['comercial', 'financiero', 'proyectos', 'operaciones'].map(mod => {
                         const isChecked = u.modules?.includes(mod) || false;
                         return (
                           <label key={mod} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.85rem', cursor: 'pointer' }}>
@@ -340,7 +340,7 @@ export default function Admin() {
                                 handleUpdateUser(u.id, { modules: next });
                               }}
                             />
-                            {mod === 'comercial' ? 'Com.' : mod === 'financiero' ? 'Fin.' : 'Proy.'}
+                            {mod === 'comercial' ? 'Com.' : mod === 'financiero' ? 'Fin.' : mod === 'proyectos' ? 'Proy.' : 'Oper.'}
                           </label>
                         );
                       })}
@@ -433,8 +433,8 @@ export default function Admin() {
                 </div>
                 <div className="form-group">
                   <label>Módulos Asignados</label>
-                  <div style={{ display: 'flex', gap: '16px', marginTop: '8px' }}>
-                    {['comercial', 'financiero', 'proyectos'].map(mod => (
+                  <div style={{ display: 'flex', gap: '16px', marginTop: '8px', flexWrap: 'wrap' }}>
+                    {['comercial', 'financiero', 'proyectos', 'operaciones'].map(mod => (
                       <label key={mod} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
                         <input 
                           type="checkbox" 
