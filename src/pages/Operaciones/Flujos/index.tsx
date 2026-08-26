@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Workflow, 
   Plus, 
@@ -35,6 +35,21 @@ interface Client {
 export const getClientDisplayName = (client?: { name?: string; reference_name?: string } | null) => {
   if (!client) return 'Cliente';
   return client.reference_name || client.name || 'Cliente';
+};
+
+// Local Timezone Date formatters (YYYY-MM-DD)
+export const getLocalDateStr = (d: Date = new Date()) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export const getExecLocalDateStr = (dateStr?: string) => {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  return getLocalDateStr(d);
 };
 
 interface FlowExecution {
@@ -82,10 +97,9 @@ export default function Flujos() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'running' | 'error' | 'success' | 'active'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Date Filter State (Defaults to Today)
-  const getTodayStr = () => new Date().toISOString().slice(0, 10);
+  // Date Filter State (Defaults to Local Today)
   const [dateFilterMode, setDateFilterMode] = useState<'today' | 'yesterday' | 'custom' | 'all'>('today');
-  const [selectedDate, setSelectedDate] = useState<string>(getTodayStr());
+  const [selectedDate, setSelectedDate] = useState<string>(getLocalDateStr());
 
   // Accordion Expand States
   const [expandedFlowIds, setExpandedFlowIds] = useState<Set<string>>(new Set());
@@ -187,11 +201,11 @@ export default function Flujos() {
   const handleDateModeChange = (mode: 'today' | 'yesterday' | 'custom' | 'all') => {
     setDateFilterMode(mode);
     if (mode === 'today') {
-      setSelectedDate(getTodayStr());
+      setSelectedDate(getLocalDateStr());
     } else if (mode === 'yesterday') {
       const y = new Date();
       y.setDate(y.getDate() - 1);
-      setSelectedDate(y.toISOString().slice(0, 10));
+      setSelectedDate(getLocalDateStr(y));
     } else if (mode === 'all') {
       setSelectedDate('all');
     }
@@ -327,17 +341,17 @@ export default function Flujos() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  // Filtered Flows
+  // Filtered Flows based on Client, Date, Status, and Search
   const filteredFlows = flows.filter(flow => {
     // 1. Client filter
     if (selectedClientId !== 'all' && flow.client_id !== selectedClientId) {
       return false;
     }
 
-    // 2. Date filter (Checks if the latest execution matches the selected date)
+    // 2. Date filter (Using local timezone comparison)
     if (selectedDate !== 'all') {
-      const execDate = flow.latest_execution?.started_at ? flow.latest_execution.started_at.slice(0, 10) : null;
-      if (execDate !== selectedDate) {
+      const execLocalDate = getExecLocalDateStr(flow.latest_execution?.started_at);
+      if (execLocalDate !== selectedDate) {
         return false;
       }
     }
@@ -368,8 +382,8 @@ export default function Flujos() {
     return true;
   });
 
-  // Calculate Metrics for Current Filter
-  const totalFlowsCount = flows.length;
+  // Calculate Metrics ONLY for the active filter/date
+  const visibleTotal = filteredFlows.length;
   const runningExecutions = filteredFlows.filter(f => f.latest_execution?.status === 'running').length;
   const errorExecutions = filteredFlows.filter(f => f.latest_execution?.status === 'error').length;
   const successfulExecutions = filteredFlows.filter(f => f.latest_execution?.status === 'success').length;
@@ -432,15 +446,19 @@ export default function Flujos() {
         </div>
       </div>
 
-      {/* ── KPI Summary Cards ── */}
+      {/* ── KPI Summary Cards (Scoped to Active Date/Filter) ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
         <div style={{ background: 'white', padding: '14px 18px', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '14px' }}>
           <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569' }}>
             <Workflow size={18} />
           </div>
           <div>
-            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Flujos Visibles</div>
-            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0f172a' }}>{filteredFlows.length} <span style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 500 }}>/ {totalFlowsCount}</span></div>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+              {selectedDate === 'all' ? 'Total Flujos (Histórico)' : 'Flujos del Día'}
+            </div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0f172a' }}>
+              {visibleTotal}
+            </div>
           </div>
         </div>
 
@@ -469,7 +487,7 @@ export default function Flujos() {
             <CheckCircle2 size={18} />
           </div>
           <div>
-            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Terminados Hoy</div>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Terminados con Éxito</div>
             <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#16a34a' }}>{successfulExecutions}</div>
           </div>
         </div>
@@ -482,7 +500,7 @@ export default function Flujos() {
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.825rem', fontWeight: 700, color: '#475569' }}>
             <Calendar size={16} color="#8b5cf6" />
-            <span>Monitorear Fecha:</span>
+            <span>Fecha a Monitorear:</span>
           </div>
 
           <div style={{ display: 'flex', gap: '6px', background: '#f8fafc', padding: '3px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
@@ -499,7 +517,7 @@ export default function Flujos() {
                 color: dateFilterMode === 'today' ? 'white' : '#64748b'
               }}
             >
-              Hoy ({getTodayStr()})
+              Hoy ({getLocalDateStr()})
             </button>
             <button
               onClick={() => handleDateModeChange('yesterday')}
@@ -693,7 +711,7 @@ export default function Flujos() {
         </div>
       </div>
 
-      {/* ── High-Density Table Layout with Accordion ── */}
+      {/* ── Table Layout with Semantic Columns & Interactive Accordion ── */}
       {loading ? (
         <div style={{ background: 'white', padding: '50px 20px', borderRadius: '16px', textAlign: 'center', color: '#64748b' }}>
           <Loader2 className="animate-spin" size={30} color="#8b5cf6" style={{ margin: '0 auto 10px' }} />
@@ -708,9 +726,16 @@ export default function Flujos() {
             No hay flujos ejecutados para la fecha seleccionada ({selectedDate === 'all' ? 'Histórico' : selectedDate})
           </h3>
           <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem', maxWidth: '420px' }}>
-            Cambia la fecha de filtro a "Histórico Completo" o ejecuta tus automatizaciones en N8N para ver resultados.
+            Cambia la fecha a "Ayer" o "Histórico Completo" para ver ejecuciones pasadas.
           </p>
           <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+            <button
+              onClick={() => handleDateModeChange('yesterday')}
+              className="btn btn-secondary"
+              style={{ fontSize: '0.8rem' }}
+            >
+              Ver Ayer
+            </button>
             <button
               onClick={() => handleDateModeChange('all')}
               className="btn btn-secondary"
@@ -733,14 +758,14 @@ export default function Flujos() {
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '0.725rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  <th style={{ padding: '12px 14px', width: '40px', textAlign: 'center' }}></th>
-                  <th style={{ padding: '12px 14px' }}>ESTADO</th>
-                  <th style={{ padding: '12px 14px' }}>FLUJO / OBJETIVO</th>
-                  <th style={{ padding: '12px 14px' }}>CLIENTE</th>
-                  <th style={{ padding: '12px 14px' }}>PASO ACTUAL</th>
-                  <th style={{ padding: '12px 14px' }}>HORA / DURACIÓN</th>
+                  <th style={{ padding: '12px 10px', width: '36px', textAlign: 'center' }}></th>
+                  <th style={{ padding: '12px 14px', width: '130px' }}>ESTADO</th>
+                  <th style={{ padding: '12px 14px', minWidth: '180px' }}>FLUJO / OBJETIVO</th>
+                  <th style={{ padding: '12px 14px', width: '150px' }}>CLIENTE</th>
+                  <th style={{ padding: '12px 14px', width: '180px' }}>PASO ACTUAL</th>
+                  <th style={{ padding: '12px 14px', width: '140px' }}>HORA / DURACIÓN</th>
                   <th style={{ padding: '12px 14px' }}>RESULTADO / ERROR</th>
-                  <th style={{ padding: '12px 14px', textAlign: 'right' }}>ACCIONES</th>
+                  <th style={{ padding: '12px 14px', width: '130px', textAlign: 'right' }}>ACCIONES</th>
                 </tr>
               </thead>
               <tbody>
@@ -756,147 +781,146 @@ export default function Flujos() {
                   const errorMsg = exec?.error_log || (typeof exec?.payload_output === 'string' ? exec.payload_output : exec?.payload_output?.error?.message || exec?.payload_output?.message);
 
                   return (
-                    <tr key={flow.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td colSpan={8} style={{ padding: 0 }}>
-                        {/* ── Main Compact Row ── */}
-                        <div 
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: '40px 140px 1.4fr 1.1fr 1.1fr 140px 1.4fr 140px',
+                    <React.Fragment key={flow.id}>
+                      {/* ── Main Table Row (Semantic TD Columns) ── */}
+                      <tr 
+                        style={{
+                          background: isExpanded ? '#faf5ff' : isError ? '#fff8f8' : isRunning ? '#f8faff' : 'white',
+                          borderBottom: isExpanded ? 'none' : '1px solid #f1f5f9',
+                          cursor: 'pointer',
+                          transition: 'background 0.15s ease'
+                        }}
+                        onClick={() => toggleExpand(flow.id)}
+                      >
+                        {/* Col 0: Toggle Accordion */}
+                        <td style={{ padding: '12px 10px', textAlign: 'center', color: '#8b5cf6' }}>
+                          {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </td>
+
+                        {/* Col 1: Estado Badge */}
+                        <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                          <span style={{
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            fontSize: '0.7rem',
+                            fontWeight: 800,
+                            textTransform: 'uppercase',
+                            display: 'inline-flex',
                             alignItems: 'center',
-                            padding: '10px 14px',
-                            background: isExpanded ? '#faf5ff' : isError ? '#fffdfd' : isRunning ? '#fbfdff' : 'white',
-                            cursor: 'pointer',
-                            transition: 'background 0.15s ease'
-                          }}
-                          onClick={() => toggleExpand(flow.id)}
-                        >
-                          {/* Col 0: Accordion Toggle Icon */}
-                          <div style={{ display: 'flex', justifyContent: 'center', color: '#8b5cf6' }}>
-                            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                          </div>
+                            gap: '4px',
+                            background: isError ? '#fee2e2' : isRunning ? '#dbeafe' : isSuccess ? '#dcfce7' : '#f1f5f9',
+                            color: isError ? '#dc2626' : isRunning ? '#2563eb' : isSuccess ? '#15803d' : '#64748b'
+                          }}>
+                            {isRunning ? (
+                              <Loader2 size={11} className="animate-spin" />
+                            ) : isError ? (
+                              <AlertCircle size={11} />
+                            ) : isSuccess ? (
+                              <CheckCircle2 size={11} />
+                            ) : (
+                              <Clock size={11} />
+                            )}
+                            {isError ? 'Error' : isRunning ? 'En Proceso' : isSuccess ? 'Terminado' : 'Standby'}
+                          </span>
+                        </td>
 
-                          {/* Col 1: Status Badge & Mini Stepper */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{
-                              padding: '3px 8px',
-                              borderRadius: '6px',
-                              fontSize: '0.7rem',
-                              fontWeight: 800,
-                              textTransform: 'uppercase',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              background: isError ? '#fee2e2' : isRunning ? '#dbeafe' : isSuccess ? '#dcfce7' : '#f1f5f9',
-                              color: isError ? '#dc2626' : isRunning ? '#2563eb' : isSuccess ? '#15803d' : '#64748b'
-                            }}>
-                              {isRunning ? (
-                                <Loader2 size={11} className="animate-spin" />
-                              ) : isError ? (
-                                <AlertCircle size={11} />
-                              ) : isSuccess ? (
-                                <CheckCircle2 size={11} />
-                              ) : (
-                                <Clock size={11} />
-                              )}
-                              {isError ? 'Error' : isRunning ? 'En Proceso' : isSuccess ? 'Terminado' : 'Standby'}
-                            </span>
+                        {/* Col 2: Flujo / Objetivo */}
+                        <td style={{ padding: '12px 14px' }}>
+                          <div style={{ fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>{flow.name}</span>
+                            {flow.status === 'paused' && (
+                              <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '1px 5px', borderRadius: '4px', background: '#fef3c7', color: '#b45309' }}>
+                                PAUSADO
+                              </span>
+                            )}
                           </div>
+                          {flow.n8n_workflow_id && (
+                            <div style={{ fontSize: '0.7rem', color: '#8b5cf6', fontFamily: 'monospace' }}>
+                              {flow.n8n_workflow_id}
+                            </div>
+                          )}
+                        </td>
 
-                          {/* Col 2: Flow Name & N8N ID */}
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingRight: '10px' }}>
-                            <div style={{ fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span>{flow.name}</span>
-                              {flow.status === 'paused' && (
-                                <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '1px 5px', borderRadius: '4px', background: '#fef3c7', color: '#b45309' }}>
-                                  PAUSADO
-                                </span>
+                        {/* Col 3: Cliente */}
+                        <td style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                          <span style={{
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            background: '#f1f5f9',
+                            color: '#334155',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}>
+                            <Building2 size={12} color="#64748b" />
+                            {getClientDisplayName(flow.client)}
+                          </span>
+                        </td>
+
+                        {/* Col 4: Paso Actual */}
+                        <td style={{ padding: '12px 14px', fontSize: '0.8rem', color: '#475569' }}>
+                          {exec?.step_name ? (
+                            <div style={{ fontWeight: 600, color: isError ? '#dc2626' : isRunning ? '#2563eb' : '#15803d' }}>
+                              {exec.step_name} {exec.step_total > 0 && `(${exec.step_current}/${exec.step_total})`}
+                            </div>
+                          ) : (
+                            <span style={{ color: '#94a3b8' }}>-</span>
+                          )}
+                        </td>
+
+                        {/* Col 5: Hora / Duración */}
+                        <td style={{ padding: '12px 14px', fontSize: '0.75rem', color: '#64748b', whiteSpace: 'nowrap' }}>
+                          {exec ? (
+                            <div>
+                              <div style={{ fontWeight: 600, color: '#334155' }}>
+                                {new Date(exec.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              </div>
+                              {exec.finished_at && (
+                                <div style={{ color: '#94a3b8', fontSize: '0.7rem' }}>
+                                  Duración: {Math.max(1, Math.round((new Date(exec.finished_at).getTime() - new Date(exec.started_at).getTime()) / 1000))}s
+                                </div>
                               )}
                             </div>
-                            {flow.n8n_workflow_id && (
-                              <div style={{ fontSize: '0.7rem', color: '#8b5cf6', fontFamily: 'monospace' }}>
-                                {flow.n8n_workflow_id}
-                              </div>
-                            )}
-                          </div>
+                          ) : (
+                            <span style={{ color: '#94a3b8' }}>-</span>
+                          )}
+                        </td>
 
-                          {/* Col 3: Client Company */}
-                          <div>
-                            <span style={{
-                              fontSize: '0.75rem',
-                              fontWeight: 700,
-                              padding: '3px 8px',
+                        {/* Col 6: Resultado / Error */}
+                        <td style={{ padding: '12px 14px', maxWidth: '320px' }}>
+                          {isError && errorMsg ? (
+                            <div style={{
+                              color: '#b91c1c',
+                              background: '#fef2f2',
+                              border: '1px solid #fecaca',
+                              padding: '4px 8px',
                               borderRadius: '6px',
-                              background: '#f1f5f9',
-                              color: '#334155',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}>
-                              <Building2 size={12} color="#64748b" />
-                              {getClientDisplayName(flow.client)}
+                              fontSize: '0.75rem',
+                              fontFamily: 'monospace',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
+                            }} title={String(errorMsg)}>
+                              ⚠️ {String(errorMsg)}
+                            </div>
+                          ) : isSuccess ? (
+                            <span style={{ color: '#16a34a', fontSize: '0.75rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <Check size={14} /> Concluyó sin errores
                             </span>
-                          </div>
+                          ) : isRunning ? (
+                            <span style={{ color: '#2563eb', fontSize: '0.75rem', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <Loader2 size={13} className="animate-spin" /> Procesando en N8N...
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>Standby</span>
+                          )}
+                        </td>
 
-                          {/* Col 4: Current Step */}
-                          <div style={{ color: '#475569', fontSize: '0.8rem' }}>
-                            {exec?.step_name ? (
-                              <div style={{ fontWeight: 600, color: isError ? '#dc2626' : isRunning ? '#2563eb' : '#15803d' }}>
-                                {exec.step_name} {exec.step_total > 0 && `(${exec.step_current}/${exec.step_total})`}
-                              </div>
-                            ) : (
-                              <span style={{ color: '#94a3b8' }}>-</span>
-                            )}
-                          </div>
-
-                          {/* Col 5: Time & Duration */}
-                          <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                            {exec ? (
-                              <div>
-                                <div>{new Date(exec.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
-                                {exec.finished_at && (
-                                  <div style={{ color: '#94a3b8', fontSize: '0.7rem' }}>
-                                    Duración: {Math.max(1, Math.round((new Date(exec.finished_at).getTime() - new Date(exec.started_at).getTime()) / 1000))}s
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <span style={{ color: '#94a3b8' }}>Sin ejecuciones</span>
-                            )}
-                          </div>
-
-                          {/* Col 6: Result / Error Snippet */}
-                          <div style={{ paddingRight: '10px' }}>
-                            {isError && errorMsg ? (
-                              <div style={{
-                                color: '#b91c1c',
-                                background: '#fef2f2',
-                                border: '1px solid #fecaca',
-                                padding: '3px 8px',
-                                borderRadius: '6px',
-                                fontSize: '0.75rem',
-                                fontFamily: 'monospace',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap'
-                              }} title={String(errorMsg)}>
-                                ⚠️ {String(errorMsg)}
-                              </div>
-                            ) : isSuccess ? (
-                              <span style={{ color: '#16a34a', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <Check size={14} /> Concluyó sin errores
-                              </span>
-                            ) : isRunning ? (
-                              <span style={{ color: '#2563eb', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <Loader2 size={13} className="animate-spin" /> Procesando en N8N...
-                              </span>
-                            ) : (
-                              <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>En espera de ejecución</span>
-                            )}
-                          </div>
-
-                          {/* Col 7: Actions */}
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }} onClick={e => e.stopPropagation()}>
+                        {/* Col 7: Acciones */}
+                        <td style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                             <button
                               onClick={() => handleOpenLogs(flow)}
                               className="btn btn-secondary"
@@ -923,168 +947,165 @@ export default function Flujos() {
                               <Trash2 size={14} />
                             </button>
                           </div>
-                        </div>
+                        </td>
+                      </tr>
 
-                        {/* ── Accordion Dropped Down Details ── */}
-                        {isExpanded && (
-                          <div style={{
-                            padding: '16px 20px',
-                            background: '#fdfcfe',
-                            borderTop: '1px solid #f3e8ff',
-                            borderBottom: '2px solid #e9d5ff',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '14px'
-                          }}>
-                            {/* Stepper Circles */}
-                            <div style={{ background: '#ffffff', padding: '14px 20px', borderRadius: '12px', border: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
+                      {/* ── Accordion Dropped Down Details (Separate TR) ── */}
+                      {isExpanded && (
+                        <tr style={{ background: '#fdfcfe', borderBottom: '2px solid #e9d5ff' }}>
+                          <td colSpan={8} style={{ padding: '16px 20px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                               
-                              {/* Connecting Line */}
-                              <div style={{
-                                position: 'absolute',
-                                left: '40px',
-                                right: '40px',
-                                top: '16px',
-                                height: '3px',
-                                background: '#e2e8f0',
-                                zIndex: 1
-                              }}>
+                              {/* Stepper Circles */}
+                              <div style={{ background: '#ffffff', padding: '14px 20px', borderRadius: '12px', border: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
+                                
+                                {/* Connecting Line */}
                                 <div style={{
-                                  height: '100%',
-                                  background: isError ? '#ef4444' : isSuccess ? '#16a34a' : isRunning ? '#3b82f6' : '#e2e8f0',
-                                  width: isSuccess ? '100%' : isError ? '100%' : isRunning ? '50%' : '0%',
-                                  transition: 'width 0.4s ease'
-                                }} />
-                              </div>
-
-                              {/* Step 1: No iniciado / En Cola */}
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', zIndex: 2 }}>
-                                <div style={{
-                                  width: '30px',
-                                  height: '30px',
-                                  borderRadius: '50%',
-                                  background: hasExec ? '#2563eb' : '#cbd5e1',
-                                  color: 'white',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontWeight: 700,
-                                  fontSize: '0.75rem',
-                                  boxShadow: hasExec ? '0 0 0 4px #dbeafe' : 'none'
+                                  position: 'absolute',
+                                  left: '40px',
+                                  right: '40px',
+                                  top: '16px',
+                                  height: '3px',
+                                  background: '#e2e8f0',
+                                  zIndex: 1
                                 }}>
-                                  {hasExec ? <Check size={15} /> : '1'}
+                                  <div style={{
+                                    height: '100%',
+                                    background: isError ? '#ef4444' : isSuccess ? '#16a34a' : isRunning ? '#3b82f6' : '#e2e8f0',
+                                    width: isSuccess ? '100%' : isError ? '100%' : isRunning ? '50%' : '0%',
+                                    transition: 'width 0.4s ease'
+                                  }} />
                                 </div>
-                                <span style={{ fontSize: '0.7rem', fontWeight: 600, color: hasExec ? '#0f172a' : '#94a3b8' }}>
-                                  1. En Cola
-                                </span>
-                              </div>
 
-                              {/* Step 2: Iniciado / En Proceso */}
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', zIndex: 2 }}>
-                                <div style={{
-                                  width: '30px',
-                                  height: '30px',
-                                  borderRadius: '50%',
-                                  background: isRunning ? '#3b82f6' : (isSuccess || isError) ? '#2563eb' : '#cbd5e1',
-                                  color: 'white',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontWeight: 700,
-                                  fontSize: '0.75rem',
-                                  boxShadow: isRunning ? '0 0 0 4px #bfdbfe' : (isSuccess || isError) ? '0 0 0 4px #dbeafe' : 'none'
-                                }}>
-                                  {isRunning ? <Loader2 size={15} className="animate-spin" /> : (isSuccess || isError) ? <Check size={15} /> : '2'}
-                                </div>
-                                <span style={{ fontSize: '0.7rem', fontWeight: 600, color: isRunning ? '#2563eb' : (isSuccess || isError) ? '#0f172a' : '#94a3b8' }}>
-                                  2. En Proceso
-                                </span>
-                              </div>
-
-                              {/* Step 3: Resultado (Terminado / Error) */}
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', zIndex: 2 }}>
-                                <div style={{
-                                  width: '30px',
-                                  height: '30px',
-                                  borderRadius: '50%',
-                                  background: isError ? '#ef4444' : isSuccess ? '#16a34a' : '#cbd5e1',
-                                  color: 'white',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontWeight: 700,
-                                  fontSize: '0.75rem',
-                                  boxShadow: isError ? '0 0 0 4px #fee2e2' : isSuccess ? '0 0 0 4px #dcfce7' : 'none'
-                                }}>
-                                  {isError ? <AlertCircle size={15} /> : isSuccess ? <Check size={15} /> : '3'}
-                                </div>
-                                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: isError ? '#ef4444' : isSuccess ? '#16a34a' : '#94a3b8' }}>
-                                  {isError ? '3. Marcó Error' : isSuccess ? '3. Terminado' : '3. Finalizado'}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Detailed Error Log Box */}
-                            {isError && (exec?.error_log || exec?.payload_output?.error || exec?.payload_output?.message) && (
-                              <div style={{
-                                padding: '12px 14px',
-                                background: '#fff1f2',
-                                border: '1px solid #fecdd3',
-                                borderRadius: '10px',
-                                color: '#9f1239',
-                                fontSize: '0.8rem',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '6px'
-                              }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                  <span style={{ fontWeight: 800, color: '#e11d48', fontSize: '0.75rem', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <AlertCircle size={14} /> Detalle del Log de Error (N8N):
+                                {/* Step 1: No iniciado / En Cola */}
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', zIndex: 2 }}>
+                                  <div style={{
+                                    width: '30px',
+                                    height: '30px',
+                                    borderRadius: '50%',
+                                    background: hasExec ? '#2563eb' : '#cbd5e1',
+                                    color: 'white',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontWeight: 700,
+                                    fontSize: '0.75rem',
+                                    boxShadow: hasExec ? '0 0 0 4px #dbeafe' : 'none'
+                                  }}>
+                                    {hasExec ? <Check size={15} /> : '1'}
+                                  </div>
+                                  <span style={{ fontSize: '0.7rem', fontWeight: 600, color: hasExec ? '#0f172a' : '#94a3b8' }}>
+                                    1. En Cola
                                   </span>
-                                  <button
-                                    onClick={() => handleCopy(exec.error_log || JSON.stringify(exec.payload_output?.error || exec.payload_output, null, 2), `err-card-${exec.id}`)}
-                                    style={{ border: 'none', background: '#ffe4e6', color: '#be123c', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem' }}
-                                  >
-                                    {copiedKey === `err-card-${exec.id}` ? '✓ Copiado' : 'Copiar Log'}
-                                  </button>
                                 </div>
-                                <pre style={{
-                                  fontFamily: 'monospace',
-                                  background: '#881337',
-                                  color: '#ffffff',
-                                  padding: '10px 12px',
-                                  borderRadius: '8px',
-                                  fontSize: '0.775rem',
-                                  lineHeight: 1.45,
-                                  whiteSpace: 'pre-wrap',
-                                  wordBreak: 'break-word',
-                                  margin: 0
+
+                                {/* Step 2: Iniciado / En Proceso */}
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', zIndex: 2 }}>
+                                  <div style={{
+                                    width: '30px',
+                                    height: '30px',
+                                    borderRadius: '50%',
+                                    background: isRunning ? '#3b82f6' : (isSuccess || isError) ? '#2563eb' : '#cbd5e1',
+                                    color: 'white',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontWeight: 700,
+                                    fontSize: '0.75rem',
+                                    boxShadow: isRunning ? '0 0 0 4px #bfdbfe' : (isSuccess || isError) ? '0 0 0 4px #dbeafe' : 'none'
+                                  }}>
+                                    {isRunning ? <Loader2 size={15} className="animate-spin" /> : (isSuccess || isError) ? <Check size={15} /> : '2'}
+                                  </div>
+                                  <span style={{ fontSize: '0.7rem', fontWeight: 600, color: isRunning ? '#2563eb' : (isSuccess || isError) ? '#0f172a' : '#94a3b8' }}>
+                                    2. En Proceso
+                                  </span>
+                                </div>
+
+                                {/* Step 3: Resultado (Terminado / Error) */}
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', zIndex: 2 }}>
+                                  <div style={{
+                                    width: '30px',
+                                    height: '30px',
+                                    borderRadius: '50%',
+                                    background: isError ? '#ef4444' : isSuccess ? '#16a34a' : '#cbd5e1',
+                                    color: 'white',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontWeight: 700,
+                                    fontSize: '0.75rem',
+                                    boxShadow: isError ? '0 0 0 4px #fee2e2' : isSuccess ? '0 0 0 4px #dcfce7' : 'none'
+                                  }}>
+                                    {isError ? <AlertCircle size={15} /> : isSuccess ? <Check size={15} /> : '3'}
+                                  </div>
+                                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: isError ? '#ef4444' : isSuccess ? '#16a34a' : '#94a3b8' }}>
+                                    {isError ? '3. Marcó Error' : isSuccess ? '3. Terminado' : '3. Finalizado'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Detailed Error Log Box */}
+                              {isError && (exec?.error_log || exec?.payload_output?.error || exec?.payload_output?.message) && (
+                                <div style={{
+                                  padding: '12px 14px',
+                                  background: '#fff1f2',
+                                  border: '1px solid #fecdd3',
+                                  borderRadius: '10px',
+                                  color: '#9f1239',
+                                  fontSize: '0.8rem',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '6px'
                                 }}>
-                                  {exec.error_log || (typeof exec.payload_output === 'string' ? exec.payload_output : JSON.stringify(exec.payload_output?.error || exec.payload_output, null, 2))}
-                                </pre>
-                              </div>
-                            )}
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <span style={{ fontWeight: 800, color: '#e11d48', fontSize: '0.75rem', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                      <AlertCircle size={14} /> Detalle del Log de Error (N8N):
+                                    </span>
+                                    <button
+                                      onClick={() => handleCopy(exec.error_log || JSON.stringify(exec.payload_output?.error || exec.payload_output, null, 2), `err-card-${exec.id}`)}
+                                      style={{ border: 'none', background: '#ffe4e6', color: '#be123c', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem' }}
+                                    >
+                                      {copiedKey === `err-card-${exec.id}` ? '✓ Copiado' : 'Copiar Log'}
+                                    </button>
+                                  </div>
+                                  <pre style={{
+                                    fontFamily: 'monospace',
+                                    background: '#881337',
+                                    color: '#ffffff',
+                                    padding: '10px 12px',
+                                    borderRadius: '8px',
+                                    fontSize: '0.775rem',
+                                    lineHeight: 1.45,
+                                    whiteSpace: 'pre-wrap',
+                                    wordBreak: 'break-word',
+                                    margin: 0
+                                  }}>
+                                    {exec.error_log || (typeof exec.payload_output === 'string' ? exec.payload_output : JSON.stringify(exec.payload_output?.error || exec.payload_output, null, 2))}
+                                  </pre>
+                                </div>
+                              )}
 
-                            {/* Meta & Payload Details */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', fontSize: '0.75rem', color: '#64748b' }}>
-                              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                                <span>Flow ID: <strong style={{ fontFamily: 'monospace', color: '#8b5cf6' }}>{flow.id}</strong></span>
-                                {exec?.execution_id && <span>N8N Exec: <strong style={{ fontFamily: 'monospace' }}>#{exec.execution_id}</strong></span>}
-                                {flow.description && <span>Descripción: <em>{flow.description}</em></span>}
-                              </div>
+                              {/* Meta & Payload Details */}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', fontSize: '0.75rem', color: '#64748b' }}>
+                                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                                  <span>Flow ID: <strong style={{ fontFamily: 'monospace', color: '#8b5cf6' }}>{flow.id}</strong></span>
+                                  {exec?.execution_id && <span>N8N Exec: <strong style={{ fontFamily: 'monospace' }}>#{exec.execution_id}</strong></span>}
+                                  {flow.description && <span>Descripción: <em>{flow.description}</em></span>}
+                                </div>
 
-                              <button
-                                onClick={() => handleOpenLogs(flow)}
-                                className="btn btn-secondary"
-                                style={{ padding: '4px 10px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px', color: '#8b5cf6', borderColor: '#ddd6fe' }}
-                              >
-                                <Code2 size={13} /> Ver Historial Completo de Ejecuciones →
-                              </button>
+                                <button
+                                  onClick={() => handleOpenLogs(flow)}
+                                  className="btn btn-secondary"
+                                  style={{ padding: '4px 10px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px', color: '#8b5cf6', borderColor: '#ddd6fe' }}
+                                >
+                                  <Code2 size={13} /> Ver Historial Completo de Ejecuciones →
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
