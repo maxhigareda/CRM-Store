@@ -15,7 +15,12 @@ import {
   Play, 
   PauseCircle, 
   Trash2, 
-  X 
+  X,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { useNotification } from '../../../contexts/NotificationContext';
@@ -77,6 +82,14 @@ export default function Flujos() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'running' | 'error' | 'success' | 'active'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Date Filter State (Defaults to Today)
+  const getTodayStr = () => new Date().toISOString().slice(0, 10);
+  const [dateFilterMode, setDateFilterMode] = useState<'today' | 'yesterday' | 'custom' | 'all'>('today');
+  const [selectedDate, setSelectedDate] = useState<string>(getTodayStr());
+
+  // Accordion Expand States
+  const [expandedFlowIds, setExpandedFlowIds] = useState<Set<string>>(new Set());
+
   // Modals & Panels
   const [showNewFlowModal, setShowNewFlowModal] = useState(false);
   const [showWebhookGuideModal, setShowWebhookGuideModal] = useState(false);
@@ -124,11 +137,13 @@ export default function Flujos() {
       let latestExecs: Record<string, FlowExecution> = {};
 
       if (flowIds.length > 0) {
-        const { data: execsData, error: execsErr } = await supabase
+        let query = supabase
           .from('flow_executions')
           .select('*')
           .in('flow_id', flowIds)
           .order('started_at', { ascending: false });
+
+        const { data: execsData, error: execsErr } = await query;
 
         if (!execsErr && execsData) {
           // Map latest execution per flow
@@ -168,6 +183,38 @@ export default function Flujos() {
     return () => clearInterval(interval);
   }, [autoRefresh]);
 
+  // Date Filter Switcher
+  const handleDateModeChange = (mode: 'today' | 'yesterday' | 'custom' | 'all') => {
+    setDateFilterMode(mode);
+    if (mode === 'today') {
+      setSelectedDate(getTodayStr());
+    } else if (mode === 'yesterday') {
+      const y = new Date();
+      y.setDate(y.getDate() - 1);
+      setSelectedDate(y.toISOString().slice(0, 10));
+    } else if (mode === 'all') {
+      setSelectedDate('all');
+    }
+  };
+
+  // Toggle Accordion Rows
+  const toggleExpand = (flowId: string) => {
+    setExpandedFlowIds(prev => {
+      const next = new Set(prev);
+      if (next.has(flowId)) next.delete(flowId);
+      else next.add(flowId);
+      return next;
+    });
+  };
+
+  const handleExpandAll = () => {
+    if (expandedFlowIds.size === filteredFlows.length) {
+      setExpandedFlowIds(new Set());
+    } else {
+      setExpandedFlowIds(new Set(filteredFlows.map(f => f.id)));
+    }
+  };
+
   // Fetch execution history when a flow is selected for logs
   const handleOpenLogs = async (flow: OperationFlow) => {
     setSelectedFlowForLogs(flow);
@@ -178,7 +225,7 @@ export default function Flujos() {
         .select('*')
         .eq('flow_id', flow.id)
         .order('started_at', { ascending: false })
-        .limit(25);
+        .limit(30);
 
       if (error) throw error;
       setFlowExecutionsHistory(data || []);
@@ -213,7 +260,7 @@ export default function Flujos() {
           description: newFlowDescription.trim() || null,
           status: 'active'
         })
-        .select(`*, client:clients(id, name)`)
+        .select(`*, client:clients(id, name, reference_name)`)
         .single();
 
       if (error) throw error;
@@ -282,19 +329,30 @@ export default function Flujos() {
 
   // Filtered Flows
   const filteredFlows = flows.filter(flow => {
-    // Client filter
+    // 1. Client filter
     if (selectedClientId !== 'all' && flow.client_id !== selectedClientId) {
       return false;
     }
-    // Search query
+
+    // 2. Date filter (Checks if the latest execution matches the selected date)
+    if (selectedDate !== 'all') {
+      const execDate = flow.latest_execution?.started_at ? flow.latest_execution.started_at.slice(0, 10) : null;
+      if (execDate !== selectedDate) {
+        return false;
+      }
+    }
+
+    // 3. Search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       const matchName = flow.name.toLowerCase().includes(query);
       const matchClient = (flow.client?.reference_name || flow.client?.name || '').toLowerCase().includes(query);
       const matchDesc = flow.description?.toLowerCase().includes(query);
-      if (!matchName && !matchClient && !matchDesc) return false;
+      const matchN8n = flow.n8n_workflow_id?.toLowerCase().includes(query);
+      if (!matchName && !matchClient && !matchDesc && !matchN8n) return false;
     }
-    // Status filter
+
+    // 4. Status filter
     if (statusFilter === 'running') {
       return flow.latest_execution?.status === 'running';
     }
@@ -310,18 +368,18 @@ export default function Flujos() {
     return true;
   });
 
-  // Calculate Metrics
-  const totalFlows = flows.length;
-  const runningExecutions = flows.filter(f => f.latest_execution?.status === 'running').length;
-  const errorExecutions = flows.filter(f => f.latest_execution?.status === 'error').length;
-  const successfulExecutions = flows.filter(f => f.latest_execution?.status === 'success').length;
+  // Calculate Metrics for Current Filter
+  const totalFlowsCount = flows.length;
+  const runningExecutions = filteredFlows.filter(f => f.latest_execution?.status === 'running').length;
+  const errorExecutions = filteredFlows.filter(f => f.latest_execution?.status === 'error').length;
+  const successfulExecutions = filteredFlows.filter(f => f.latest_execution?.status === 'success').length;
 
   // Supabase REST endpoint info
   const supabaseUrl = 'https://zzrnpuefuxvnhkipjxqn.supabase.co';
   const restEndpoint = `${supabaseUrl}/rest/v1/flow_executions`;
 
   return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px', background: '#f8fafc', minHeight: 'calc(100vh - 64px)' }}>
+    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', background: '#f8fafc', minHeight: 'calc(100vh - 64px)' }}>
       
       {/* ── Main Dashboard Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
@@ -330,15 +388,15 @@ export default function Flujos() {
             <Workflow size={26} color="#8b5cf6" />
           </div>
           <div>
-            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>Flujos de Operaciones</h1>
-            <p style={{ color: '#64748b', fontSize: '0.875rem', margin: 0 }}>Monitoreo en tiempo real de automatizaciones de N8N por cliente</p>
+            <h1 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>Monitor de Flujos de Operaciones</h1>
+            <p style={{ color: '#64748b', fontSize: '0.875rem', margin: 0 }}>Seguimiento diario de alta densidad para flujos de N8N por cliente</p>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button
             onClick={() => setAutoRefresh(!autoRefresh)}
-            className={`btn ${autoRefresh ? 'btn-secondary' : 'btn-secondary'}`}
+            className="btn btn-secondary"
             style={{ 
               display: 'flex', 
               alignItems: 'center', 
@@ -375,450 +433,663 @@ export default function Flujos() {
       </div>
 
       {/* ── KPI Summary Cards ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-        <div style={{ background: 'white', padding: '16px 20px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569' }}>
-            <Workflow size={20} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
+        <div style={{ background: 'white', padding: '14px 18px', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569' }}>
+            <Workflow size={18} />
           </div>
           <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Total de Flujos</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0f172a' }}>{totalFlows}</div>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Flujos Visibles</div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0f172a' }}>{filteredFlows.length} <span style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 500 }}>/ {totalFlowsCount}</span></div>
           </div>
         </div>
 
-        <div style={{ background: 'white', padding: '16px 20px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb' }}>
-            <Loader2 size={20} className={runningExecutions > 0 ? 'animate-spin' : ''} />
+        <div style={{ background: 'white', padding: '14px 18px', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb' }}>
+            <Loader2 size={18} className={runningExecutions > 0 ? 'animate-spin' : ''} />
           </div>
           <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>En Ejecución</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#2563eb' }}>{runningExecutions}</div>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>En Ejecución</div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#2563eb' }}>{runningExecutions}</div>
           </div>
         </div>
 
-        <div style={{ background: 'white', padding: '16px 20px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
-            <AlertCircle size={20} />
+        <div style={{ background: 'white', padding: '14px 18px', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
+            <AlertCircle size={18} />
           </div>
           <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Con Error Reciente</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#ef4444' }}>{errorExecutions}</div>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Con Error</div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#ef4444' }}>{errorExecutions}</div>
           </div>
         </div>
 
-        <div style={{ background: 'white', padding: '16px 20px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#16a34a' }}>
-            <CheckCircle2 size={20} />
+        <div style={{ background: 'white', padding: '14px 18px', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#16a34a' }}>
+            <CheckCircle2 size={18} />
           </div>
           <div>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Último Éxito</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#16a34a' }}>{successfulExecutions}</div>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Terminados Hoy</div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#16a34a' }}>{successfulExecutions}</div>
           </div>
         </div>
       </div>
 
-      {/* ── Filters and Client Selector Bar ── */}
-      <div style={{ background: 'white', padding: '16px 20px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', flexWrap: 'wrap', gap: '14px', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* ── Control Bar: Date Filter + Client Selector + Search + Status Pills ── */}
+      <div style={{ background: 'white', padding: '16px 20px', borderRadius: '16px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '14px' }}>
         
-        {/* Search and Client Dropdown */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: '1', minWidth: '300px' }}>
-          <div style={{ position: 'relative', flex: 1 }}>
-            <Search size={16} color="#94a3b8" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
-            <input
-              type="text"
-              placeholder="Buscar por flujo, cliente o descripción..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+        {/* Row 1: Date Filter Bar (Default: Hoy) */}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.825rem', fontWeight: 700, color: '#475569' }}>
+            <Calendar size={16} color="#8b5cf6" />
+            <span>Monitorear Fecha:</span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '6px', background: '#f8fafc', padding: '3px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            <button
+              onClick={() => handleDateModeChange('today')}
               style={{
-                width: '100%',
-                padding: '9px 12px 9px 36px',
-                borderRadius: '10px',
-                border: '1px solid #e2e8f0',
-                fontSize: '0.875rem',
-                outline: 'none'
+                padding: '5px 12px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                background: dateFilterMode === 'today' ? '#8b5cf6' : 'transparent',
+                color: dateFilterMode === 'today' ? 'white' : '#64748b'
+              }}
+            >
+              Hoy ({getTodayStr()})
+            </button>
+            <button
+              onClick={() => handleDateModeChange('yesterday')}
+              style={{
+                padding: '5px 12px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                background: dateFilterMode === 'yesterday' ? '#8b5cf6' : 'transparent',
+                color: dateFilterMode === 'yesterday' ? 'white' : '#64748b'
+              }}
+            >
+              Ayer
+            </button>
+            <button
+              onClick={() => handleDateModeChange('all')}
+              style={{
+                padding: '5px 12px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                background: dateFilterMode === 'all' ? '#8b5cf6' : 'transparent',
+                color: dateFilterMode === 'all' ? 'white' : '#64748b'
+              }}
+            >
+              Histórico Completo
+            </button>
+          </div>
+
+          {/* Date Picker Input */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <input
+              type="date"
+              value={selectedDate === 'all' ? '' : selectedDate}
+              onChange={e => {
+                if (e.target.value) {
+                  setSelectedDate(e.target.value);
+                  setDateFilterMode('custom');
+                }
+              }}
+              style={{
+                padding: '5px 10px',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                fontSize: '0.8rem',
+                color: '#334155',
+                outline: 'none',
+                fontWeight: 600
               }}
             />
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Building2 size={16} color="#64748b" />
-            <select
-              value={selectedClientId}
-              onChange={e => setSelectedClientId(e.target.value)}
-              style={{
-                padding: '9px 14px',
-                borderRadius: '10px',
-                border: '1px solid #e2e8f0',
-                fontSize: '0.875rem',
-                background: 'white',
-                color: '#334155',
-                outline: 'none',
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}
+          <div style={{ marginLeft: 'auto' }}>
+            <button
+              onClick={handleExpandAll}
+              className="btn btn-secondary"
+              style={{ padding: '5px 10px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px' }}
             >
-              <option value="all">🏢 Todos los Clientes ({clients.length})</option>
-              {clients.map(c => (
-                <option key={c.id} value={c.id}>{getClientDisplayName(c)}</option>
-              ))}
-            </select>
+              {expandedFlowIds.size === filteredFlows.length && filteredFlows.length > 0 ? (
+                <>
+                  <Minimize2 size={13} /> Colapsar Todo
+                </>
+              ) : (
+                <>
+                  <Maximize2 size={13} /> Expandir Todo ({filteredFlows.length})
+                </>
+              )}
+            </button>
           </div>
         </div>
 
-        {/* Status Filter Pills */}
-        <div style={{ display: 'flex', gap: '6px', background: '#f8fafc', padding: '4px', borderRadius: '10px', border: '1px solid #f1f5f9' }}>
-          <button
-            onClick={() => setStatusFilter('all')}
-            style={{
-              padding: '6px 12px',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              borderRadius: '8px',
-              border: 'none',
-              cursor: 'pointer',
-              background: statusFilter === 'all' ? 'white' : 'transparent',
-              color: statusFilter === 'all' ? '#0f172a' : '#64748b',
-              boxShadow: statusFilter === 'all' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none'
-            }}
-          >
-            Todos
-          </button>
-          <button
-            onClick={() => setStatusFilter('running')}
-            style={{
-              padding: '6px 12px',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              borderRadius: '8px',
-              border: 'none',
-              cursor: 'pointer',
-              background: statusFilter === 'running' ? '#eff6ff' : 'transparent',
-              color: statusFilter === 'running' ? '#2563eb' : '#64748b',
-              boxShadow: statusFilter === 'running' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none'
-            }}
-          >
-            ⚡ En Proceso
-          </button>
-          <button
-            onClick={() => setStatusFilter('error')}
-            style={{
-              padding: '6px 12px',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              borderRadius: '8px',
-              border: 'none',
-              cursor: 'pointer',
-              background: statusFilter === 'error' ? '#fef2f2' : 'transparent',
-              color: statusFilter === 'error' ? '#ef4444' : '#64748b',
-              boxShadow: statusFilter === 'error' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none'
-            }}
-          >
-            ⚠️ Con Error
-          </button>
-          <button
-            onClick={() => setStatusFilter('success')}
-            style={{
-              padding: '6px 12px',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              borderRadius: '8px',
-              border: 'none',
-              cursor: 'pointer',
-              background: statusFilter === 'success' ? '#f0fdf4' : 'transparent',
-              color: statusFilter === 'success' ? '#16a34a' : '#64748b',
-              boxShadow: statusFilter === 'success' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none'
-            }}
-          >
-            ✓ Terminados
-          </button>
+        {/* Row 2: Search + Client Dropdown + Status Pills */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', justifyContent: 'space-between' }}>
+          
+          {/* Search and Client Dropdown */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: '1', minWidth: '300px' }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <Search size={15} color="#94a3b8" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
+              <input
+                type="text"
+                placeholder="Buscar por flujo, cliente o error..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '7px 10px 7px 32px',
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0',
+                  fontSize: '0.85rem',
+                  outline: 'none'
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Building2 size={15} color="#64748b" />
+              <select
+                value={selectedClientId}
+                onChange={e => setSelectedClientId(e.target.value)}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0',
+                  fontSize: '0.85rem',
+                  background: 'white',
+                  color: '#334155',
+                  outline: 'none',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="all">🏢 Todos los Clientes ({clients.length})</option>
+                {clients.map(c => (
+                  <option key={c.id} value={c.id}>{getClientDisplayName(c)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Status Filter Pills */}
+          <div style={{ display: 'flex', gap: '4px', background: '#f8fafc', padding: '3px', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
+            <button
+              onClick={() => setStatusFilter('all')}
+              style={{
+                padding: '5px 10px',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                background: statusFilter === 'all' ? 'white' : 'transparent',
+                color: statusFilter === 'all' ? '#0f172a' : '#64748b',
+                boxShadow: statusFilter === 'all' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none'
+              }}
+            >
+              Todos
+            </button>
+            <button
+              onClick={() => setStatusFilter('running')}
+              style={{
+                padding: '5px 10px',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                background: statusFilter === 'running' ? '#eff6ff' : 'transparent',
+                color: statusFilter === 'running' ? '#2563eb' : '#64748b',
+                boxShadow: statusFilter === 'running' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none'
+              }}
+            >
+              ⚡ En Proceso
+            </button>
+            <button
+              onClick={() => setStatusFilter('error')}
+              style={{
+                padding: '5px 10px',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                background: statusFilter === 'error' ? '#fef2f2' : 'transparent',
+                color: statusFilter === 'error' ? '#ef4444' : '#64748b',
+                boxShadow: statusFilter === 'error' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none'
+              }}
+            >
+              ⚠️ Con Error
+            </button>
+            <button
+              onClick={() => setStatusFilter('success')}
+              style={{
+                padding: '5px 10px',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                background: statusFilter === 'success' ? '#f0fdf4' : 'transparent',
+                color: statusFilter === 'success' ? '#16a34a' : '#64748b',
+                boxShadow: statusFilter === 'success' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none'
+              }}
+            >
+              ✓ Terminados
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* ── Flows Grid / List with Progress Stepper ── */}
+      {/* ── High-Density Table Layout with Accordion ── */}
       {loading ? (
-        <div style={{ background: 'white', padding: '60px 20px', borderRadius: '16px', textAlign: 'center', color: '#64748b' }}>
-          <Loader2 className="animate-spin" size={32} color="#8b5cf6" style={{ margin: '0 auto 12px' }} />
+        <div style={{ background: 'white', padding: '50px 20px', borderRadius: '16px', textAlign: 'center', color: '#64748b' }}>
+          <Loader2 className="animate-spin" size={30} color="#8b5cf6" style={{ margin: '0 auto 10px' }} />
           <p style={{ margin: 0, fontWeight: 600 }}>Cargando catálogo de flujos de operaciones...</p>
         </div>
       ) : filteredFlows.length === 0 ? (
-        <div style={{ background: 'white', padding: '60px 20px', borderRadius: '16px', border: '1px dashed #cbd5e1', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-          <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: '#faf5ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Workflow size={28} color="#8b5cf6" />
+        <div style={{ background: 'white', padding: '50px 20px', borderRadius: '16px', border: '1px dashed #cbd5e1', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#faf5ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Workflow size={24} color="#8b5cf6" />
           </div>
-          <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#0f172a', fontWeight: 700 }}>No hay flujos registrados</h3>
-          <p style={{ margin: 0, color: '#64748b', fontSize: '0.875rem', maxWidth: '420px' }}>
-            Registra tu primer flujo de N8N asociado a un cliente para monitorear sus ejecuciones, pasos y errores.
+          <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#0f172a', fontWeight: 700 }}>
+            No hay flujos ejecutados para la fecha seleccionada ({selectedDate === 'all' ? 'Histórico' : selectedDate})
+          </h3>
+          <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem', maxWidth: '420px' }}>
+            Cambia la fecha de filtro a "Histórico Completo" o ejecuta tus automatizaciones en N8N para ver resultados.
           </p>
-          <button
-            onClick={() => setShowNewFlowModal(true)}
-            className="btn btn-primary"
-            style={{ marginTop: '8px', background: '#8b5cf6', borderColor: '#7c3aed', display: 'flex', alignItems: 'center', gap: '8px' }}
-          >
-            <Plus size={16} />
-            Crear Primer Flujo
-          </button>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+            <button
+              onClick={() => handleDateModeChange('all')}
+              className="btn btn-secondary"
+              style={{ fontSize: '0.8rem' }}
+            >
+              Ver Histórico Completo
+            </button>
+            <button
+              onClick={() => setShowNewFlowModal(true)}
+              className="btn btn-primary"
+              style={{ background: '#8b5cf6', borderColor: '#7c3aed', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              <Plus size={14} /> Crear Nuevo Flujo
+            </button>
+          </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          {filteredFlows.map(flow => {
-            const exec = flow.latest_execution;
-            const isRunning = exec?.status === 'running';
-            const isError = exec?.status === 'error';
-            const isSuccess = exec?.status === 'success';
-            const hasExec = !!exec;
+        <div style={{ background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '0.725rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  <th style={{ padding: '12px 14px', width: '40px', textAlign: 'center' }}></th>
+                  <th style={{ padding: '12px 14px' }}>ESTADO</th>
+                  <th style={{ padding: '12px 14px' }}>FLUJO / OBJETIVO</th>
+                  <th style={{ padding: '12px 14px' }}>CLIENTE</th>
+                  <th style={{ padding: '12px 14px' }}>PASO ACTUAL</th>
+                  <th style={{ padding: '12px 14px' }}>HORA / DURACIÓN</th>
+                  <th style={{ padding: '12px 14px' }}>RESULTADO / ERROR</th>
+                  <th style={{ padding: '12px 14px', textAlign: 'right' }}>ACCIONES</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredFlows.map(flow => {
+                  const exec = flow.latest_execution;
+                  const isRunning = exec?.status === 'running';
+                  const isError = exec?.status === 'error';
+                  const isSuccess = exec?.status === 'success';
+                  const hasExec = !!exec;
+                  const isExpanded = expandedFlowIds.has(flow.id);
 
-            return (
-              <div
-                key={flow.id}
-                style={{
-                  background: 'white',
-                  borderRadius: '16px',
-                  border: isError ? '1px solid #fecaca' : isRunning ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
-                  boxShadow: isRunning ? '0 4px 20px -2px rgba(59, 130, 246, 0.12)' : '0 1px 3px rgba(0,0,0,0.02)',
-                  padding: '20px 24px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '16px',
-                  transition: 'all 0.2s ease'
-                }}
-              >
-                {/* Flow Header Info */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                      width: '40px',
-                      height: '40px',
-                      borderRadius: '12px',
-                      background: isError ? '#fef2f2' : isRunning ? '#eff6ff' : isSuccess ? '#f0fdf4' : '#f8fafc',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: isError ? '#ef4444' : isRunning ? '#2563eb' : isSuccess ? '#16a34a' : '#64748b'
-                    }}>
-                      {isRunning ? (
-                        <Loader2 size={20} className="animate-spin" />
-                      ) : isError ? (
-                        <AlertCircle size={20} />
-                      ) : isSuccess ? (
-                        <CheckCircle2 size={20} />
-                      ) : (
-                        <Workflow size={20} />
-                      )}
-                    </div>
+                  // Extract error message if any
+                  const errorMsg = exec?.error_log || (typeof exec?.payload_output === 'string' ? exec.payload_output : exec?.payload_output?.error?.message || exec?.payload_output?.message);
 
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#0f172a' }}>{flow.name}</h3>
-                        <span style={{
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          padding: '2px 8px',
-                          borderRadius: '6px',
-                          background: '#f1f5f9',
-                          color: '#475569',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px'
-                        }}>
-                          <Building2 size={12} />
-                          {getClientDisplayName(flow.client)}
-                        </span>
-                        {flow.status === 'paused' && (
-                          <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '2px 6px', borderRadius: '6px', background: '#fef3c7', color: '#b45309' }}>
-                            PAUSADO
-                          </span>
-                        )}
-                      </div>
-                      {flow.description && (
-                        <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '0.825rem' }}>{flow.description}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Flow Action Buttons */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button
-                      onClick={() => handleOpenLogs(flow)}
-                      className="btn btn-secondary"
-                      style={{ padding: '6px 12px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px' }}
-                    >
-                      <Code2 size={14} />
-                      Bitácora / Logs
-                    </button>
-                    <button
-                      onClick={() => handleToggleFlowStatus(flow)}
-                      className="btn btn-secondary"
-                      style={{ padding: '6px 10px', fontSize: '0.8rem', color: flow.status === 'active' ? '#d97706' : '#16a34a' }}
-                      title={flow.status === 'active' ? 'Pausar monitoreo' : 'Activar monitoreo'}
-                    >
-                      {flow.status === 'active' ? <PauseCircle size={15} /> : <Play size={15} />}
-                    </button>
-                    <button
-                      onClick={() => setConfirmDeleteFlow(flow)}
-                      className="btn btn-secondary"
-                      style={{ padding: '6px 10px', fontSize: '0.8rem', color: '#ef4444' }}
-                      title="Eliminar flujo"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* ── Visual Process Stepper (Circles) ── */}
-                <div style={{ background: '#f8fafc', padding: '16px 20px', borderRadius: '12px', border: '1px solid #f1f5f9' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
-                    
-                    {/* Connecting Line */}
-                    <div style={{
-                      position: 'absolute',
-                      left: '40px',
-                      right: '40px',
-                      top: '16px',
-                      height: '3px',
-                      background: '#e2e8f0',
-                      zIndex: 1
-                    }}>
-                      <div style={{
-                        height: '100%',
-                        background: isError ? '#ef4444' : isSuccess ? '#16a34a' : isRunning ? '#3b82f6' : '#e2e8f0',
-                        width: isSuccess ? '100%' : isError ? '100%' : isRunning ? '50%' : '0%',
-                        transition: 'width 0.4s ease'
-                      }} />
-                    </div>
-
-                    {/* Step 1: No iniciado / En Cola */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', zIndex: 2 }}>
-                      <div style={{
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '50%',
-                        background: hasExec ? '#2563eb' : '#cbd5e1',
-                        color: 'white',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 700,
-                        fontSize: '0.8rem',
-                        boxShadow: hasExec ? '0 0 0 4px #dbeafe' : 'none'
-                      }}>
-                        {hasExec ? <Check size={16} /> : '1'}
-                      </div>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: hasExec ? '#0f172a' : '#94a3b8' }}>
-                        1. En Cola
-                      </span>
-                    </div>
-
-                    {/* Step 2: Iniciado / En Proceso */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', zIndex: 2 }}>
-                      <div style={{
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '50%',
-                        background: isRunning ? '#3b82f6' : (isSuccess || isError) ? '#2563eb' : '#cbd5e1',
-                        color: 'white',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 700,
-                        fontSize: '0.8rem',
-                        boxShadow: isRunning ? '0 0 0 4px #bfdbfe' : (isSuccess || isError) ? '0 0 0 4px #dbeafe' : 'none'
-                      }}>
-                        {isRunning ? <Loader2 size={16} className="animate-spin" /> : (isSuccess || isError) ? <Check size={16} /> : '2'}
-                      </div>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: isRunning ? '#2563eb' : (isSuccess || isError) ? '#0f172a' : '#94a3b8' }}>
-                        2. En Proceso
-                      </span>
-                    </div>
-
-                    {/* Step 3: Resultado (Terminado / Error) */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', zIndex: 2 }}>
-                      <div style={{
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '50%',
-                        background: isError ? '#ef4444' : isSuccess ? '#16a34a' : '#cbd5e1',
-                        color: 'white',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 700,
-                        fontSize: '0.8rem',
-                        boxShadow: isError ? '0 0 0 4px #fee2e2' : isSuccess ? '0 0 0 4px #dcfce7' : 'none'
-                      }}>
-                        {isError ? <AlertCircle size={16} /> : isSuccess ? <Check size={16} /> : '3'}
-                      </div>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: isError ? '#ef4444' : isSuccess ? '#16a34a' : '#94a3b8' }}>
-                        {isError ? '3. Marcó Error' : isSuccess ? '3. Terminado' : '3. Finalizado'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Execution Meta Subtext */}
-                  {exec && (
-                    <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', fontSize: '0.75rem', color: '#64748b' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Clock size={13} />
-                        <span>Iniciado: {new Date(exec.started_at).toLocaleString()}</span>
-                        {exec.finished_at && (
-                          <span>• Duración: {Math.max(1, Math.round((new Date(exec.finished_at).getTime() - new Date(exec.started_at).getTime()) / 1000))}s</span>
-                        )}
-                      </div>
-
-                      {exec.step_name && (
-                        <div style={{ fontWeight: 600, color: isError ? '#dc2626' : isRunning ? '#2563eb' : '#15803d' }}>
-                          Paso: {exec.step_name} {exec.step_total > 0 && `(${exec.step_current}/${exec.step_total})`}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Error Snippet Box if Failed */}
-                  {isError && (exec?.error_log || exec?.payload_output?.error || exec?.payload_output?.message) && (
-                    <div style={{
-                      marginTop: '12px',
-                      padding: '12px 14px',
-                      background: '#fff1f2',
-                      border: '1px solid #fecdd3',
-                      borderRadius: '10px',
-                      color: '#9f1239',
-                      fontSize: '0.825rem',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, color: '#e11d48', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                          <AlertCircle size={15} />
-                          Error en Salida / Output N8N:
-                        </div>
-                        <button
-                          onClick={() => handleOpenLogs(flow)}
-                          style={{ border: 'none', background: '#ffe4e6', color: '#be123c', padding: '3px 8px', borderRadius: '6px', fontWeight: 700, cursor: 'pointer', fontSize: '0.75rem' }}
+                  return (
+                    <tr key={flow.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td colSpan={8} style={{ padding: 0 }}>
+                        {/* ── Main Compact Row ── */}
+                        <div 
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '40px 140px 1.4fr 1.1fr 1.1fr 140px 1.4fr 140px',
+                            alignItems: 'center',
+                            padding: '10px 14px',
+                            background: isExpanded ? '#faf5ff' : isError ? '#fffdfd' : isRunning ? '#fbfdff' : 'white',
+                            cursor: 'pointer',
+                            transition: 'background 0.15s ease'
+                          }}
+                          onClick={() => toggleExpand(flow.id)}
                         >
-                          Ver Bitácora / Payloads →
-                        </button>
-                      </div>
-                      <div style={{
-                        fontFamily: 'monospace',
-                        background: '#881337',
-                        color: '#ffe4e6',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        fontSize: '0.8rem',
-                        lineHeight: 1.45,
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        maxHeight: '140px',
-                        overflowY: 'auto'
-                      }}>
-                        {exec.error_log || (typeof exec.payload_output === 'string' ? exec.payload_output : JSON.stringify(exec.payload_output?.error || exec.payload_output, null, 2))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+                          {/* Col 0: Accordion Toggle Icon */}
+                          <div style={{ display: 'flex', justifyContent: 'center', color: '#8b5cf6' }}>
+                            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                          </div>
+
+                          {/* Col 1: Status Badge & Mini Stepper */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontSize: '0.7rem',
+                              fontWeight: 800,
+                              textTransform: 'uppercase',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: isError ? '#fee2e2' : isRunning ? '#dbeafe' : isSuccess ? '#dcfce7' : '#f1f5f9',
+                              color: isError ? '#dc2626' : isRunning ? '#2563eb' : isSuccess ? '#15803d' : '#64748b'
+                            }}>
+                              {isRunning ? (
+                                <Loader2 size={11} className="animate-spin" />
+                              ) : isError ? (
+                                <AlertCircle size={11} />
+                              ) : isSuccess ? (
+                                <CheckCircle2 size={11} />
+                              ) : (
+                                <Clock size={11} />
+                              )}
+                              {isError ? 'Error' : isRunning ? 'En Proceso' : isSuccess ? 'Terminado' : 'Standby'}
+                            </span>
+                          </div>
+
+                          {/* Col 2: Flow Name & N8N ID */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingRight: '10px' }}>
+                            <div style={{ fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>{flow.name}</span>
+                              {flow.status === 'paused' && (
+                                <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '1px 5px', borderRadius: '4px', background: '#fef3c7', color: '#b45309' }}>
+                                  PAUSADO
+                                </span>
+                              )}
+                            </div>
+                            {flow.n8n_workflow_id && (
+                              <div style={{ fontSize: '0.7rem', color: '#8b5cf6', fontFamily: 'monospace' }}>
+                                {flow.n8n_workflow_id}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Col 3: Client Company */}
+                          <div>
+                            <span style={{
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              background: '#f1f5f9',
+                              color: '#334155',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}>
+                              <Building2 size={12} color="#64748b" />
+                              {getClientDisplayName(flow.client)}
+                            </span>
+                          </div>
+
+                          {/* Col 4: Current Step */}
+                          <div style={{ color: '#475569', fontSize: '0.8rem' }}>
+                            {exec?.step_name ? (
+                              <div style={{ fontWeight: 600, color: isError ? '#dc2626' : isRunning ? '#2563eb' : '#15803d' }}>
+                                {exec.step_name} {exec.step_total > 0 && `(${exec.step_current}/${exec.step_total})`}
+                              </div>
+                            ) : (
+                              <span style={{ color: '#94a3b8' }}>-</span>
+                            )}
+                          </div>
+
+                          {/* Col 5: Time & Duration */}
+                          <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                            {exec ? (
+                              <div>
+                                <div>{new Date(exec.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
+                                {exec.finished_at && (
+                                  <div style={{ color: '#94a3b8', fontSize: '0.7rem' }}>
+                                    Duración: {Math.max(1, Math.round((new Date(exec.finished_at).getTime() - new Date(exec.started_at).getTime()) / 1000))}s
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ color: '#94a3b8' }}>Sin ejecuciones</span>
+                            )}
+                          </div>
+
+                          {/* Col 6: Result / Error Snippet */}
+                          <div style={{ paddingRight: '10px' }}>
+                            {isError && errorMsg ? (
+                              <div style={{
+                                color: '#b91c1c',
+                                background: '#fef2f2',
+                                border: '1px solid #fecaca',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '0.75rem',
+                                fontFamily: 'monospace',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                              }} title={String(errorMsg)}>
+                                ⚠️ {String(errorMsg)}
+                              </div>
+                            ) : isSuccess ? (
+                              <span style={{ color: '#16a34a', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Check size={14} /> Concluyó sin errores
+                              </span>
+                            ) : isRunning ? (
+                              <span style={{ color: '#2563eb', fontSize: '0.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Loader2 size={13} className="animate-spin" /> Procesando en N8N...
+                              </span>
+                            ) : (
+                              <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>En espera de ejecución</span>
+                            )}
+                          </div>
+
+                          {/* Col 7: Actions */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px' }} onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => handleOpenLogs(flow)}
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 8px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                              title="Ver Bitácora de N8N"
+                            >
+                              <Code2 size={13} />
+                              Logs
+                            </button>
+                            <button
+                              onClick={() => handleToggleFlowStatus(flow)}
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 6px', fontSize: '0.75rem', color: flow.status === 'active' ? '#d97706' : '#16a34a' }}
+                              title={flow.status === 'active' ? 'Pausar flujo' : 'Activar flujo'}
+                            >
+                              {flow.status === 'active' ? <PauseCircle size={14} /> : <Play size={14} />}
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteFlow(flow)}
+                              className="btn btn-secondary"
+                              style={{ padding: '4px 6px', fontSize: '0.75rem', color: '#ef4444' }}
+                              title="Eliminar flujo"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* ── Accordion Dropped Down Details ── */}
+                        {isExpanded && (
+                          <div style={{
+                            padding: '16px 20px',
+                            background: '#fdfcfe',
+                            borderTop: '1px solid #f3e8ff',
+                            borderBottom: '2px solid #e9d5ff',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '14px'
+                          }}>
+                            {/* Stepper Circles */}
+                            <div style={{ background: '#ffffff', padding: '14px 20px', borderRadius: '12px', border: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
+                              
+                              {/* Connecting Line */}
+                              <div style={{
+                                position: 'absolute',
+                                left: '40px',
+                                right: '40px',
+                                top: '16px',
+                                height: '3px',
+                                background: '#e2e8f0',
+                                zIndex: 1
+                              }}>
+                                <div style={{
+                                  height: '100%',
+                                  background: isError ? '#ef4444' : isSuccess ? '#16a34a' : isRunning ? '#3b82f6' : '#e2e8f0',
+                                  width: isSuccess ? '100%' : isError ? '100%' : isRunning ? '50%' : '0%',
+                                  transition: 'width 0.4s ease'
+                                }} />
+                              </div>
+
+                              {/* Step 1: No iniciado / En Cola */}
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', zIndex: 2 }}>
+                                <div style={{
+                                  width: '30px',
+                                  height: '30px',
+                                  borderRadius: '50%',
+                                  background: hasExec ? '#2563eb' : '#cbd5e1',
+                                  color: 'white',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: 700,
+                                  fontSize: '0.75rem',
+                                  boxShadow: hasExec ? '0 0 0 4px #dbeafe' : 'none'
+                                }}>
+                                  {hasExec ? <Check size={15} /> : '1'}
+                                </div>
+                                <span style={{ fontSize: '0.7rem', fontWeight: 600, color: hasExec ? '#0f172a' : '#94a3b8' }}>
+                                  1. En Cola
+                                </span>
+                              </div>
+
+                              {/* Step 2: Iniciado / En Proceso */}
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', zIndex: 2 }}>
+                                <div style={{
+                                  width: '30px',
+                                  height: '30px',
+                                  borderRadius: '50%',
+                                  background: isRunning ? '#3b82f6' : (isSuccess || isError) ? '#2563eb' : '#cbd5e1',
+                                  color: 'white',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: 700,
+                                  fontSize: '0.75rem',
+                                  boxShadow: isRunning ? '0 0 0 4px #bfdbfe' : (isSuccess || isError) ? '0 0 0 4px #dbeafe' : 'none'
+                                }}>
+                                  {isRunning ? <Loader2 size={15} className="animate-spin" /> : (isSuccess || isError) ? <Check size={15} /> : '2'}
+                                </div>
+                                <span style={{ fontSize: '0.7rem', fontWeight: 600, color: isRunning ? '#2563eb' : (isSuccess || isError) ? '#0f172a' : '#94a3b8' }}>
+                                  2. En Proceso
+                                </span>
+                              </div>
+
+                              {/* Step 3: Resultado (Terminado / Error) */}
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', zIndex: 2 }}>
+                                <div style={{
+                                  width: '30px',
+                                  height: '30px',
+                                  borderRadius: '50%',
+                                  background: isError ? '#ef4444' : isSuccess ? '#16a34a' : '#cbd5e1',
+                                  color: 'white',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontWeight: 700,
+                                  fontSize: '0.75rem',
+                                  boxShadow: isError ? '0 0 0 4px #fee2e2' : isSuccess ? '0 0 0 4px #dcfce7' : 'none'
+                                }}>
+                                  {isError ? <AlertCircle size={15} /> : isSuccess ? <Check size={15} /> : '3'}
+                                </div>
+                                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: isError ? '#ef4444' : isSuccess ? '#16a34a' : '#94a3b8' }}>
+                                  {isError ? '3. Marcó Error' : isSuccess ? '3. Terminado' : '3. Finalizado'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Detailed Error Log Box */}
+                            {isError && (exec?.error_log || exec?.payload_output?.error || exec?.payload_output?.message) && (
+                              <div style={{
+                                padding: '12px 14px',
+                                background: '#fff1f2',
+                                border: '1px solid #fecdd3',
+                                borderRadius: '10px',
+                                color: '#9f1239',
+                                fontSize: '0.8rem',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '6px'
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <span style={{ fontWeight: 800, color: '#e11d48', fontSize: '0.75rem', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <AlertCircle size={14} /> Detalle del Log de Error (N8N):
+                                  </span>
+                                  <button
+                                    onClick={() => handleCopy(exec.error_log || JSON.stringify(exec.payload_output?.error || exec.payload_output, null, 2), `err-card-${exec.id}`)}
+                                    style={{ border: 'none', background: '#ffe4e6', color: '#be123c', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem' }}
+                                  >
+                                    {copiedKey === `err-card-${exec.id}` ? '✓ Copiado' : 'Copiar Log'}
+                                  </button>
+                                </div>
+                                <pre style={{
+                                  fontFamily: 'monospace',
+                                  background: '#881337',
+                                  color: '#ffffff',
+                                  padding: '10px 12px',
+                                  borderRadius: '8px',
+                                  fontSize: '0.775rem',
+                                  lineHeight: 1.45,
+                                  whiteSpace: 'pre-wrap',
+                                  wordBreak: 'break-word',
+                                  margin: 0
+                                }}>
+                                  {exec.error_log || (typeof exec.payload_output === 'string' ? exec.payload_output : JSON.stringify(exec.payload_output?.error || exec.payload_output, null, 2))}
+                                </pre>
+                              </div>
+                            )}
+
+                            {/* Meta & Payload Details */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', fontSize: '0.75rem', color: '#64748b' }}>
+                              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                                <span>Flow ID: <strong style={{ fontFamily: 'monospace', color: '#8b5cf6' }}>{flow.id}</strong></span>
+                                {exec?.execution_id && <span>N8N Exec: <strong style={{ fontFamily: 'monospace' }}>#{exec.execution_id}</strong></span>}
+                                {flow.description && <span>Descripción: <em>{flow.description}</em></span>}
+                              </div>
+
+                              <button
+                                onClick={() => handleOpenLogs(flow)}
+                                className="btn btn-secondary"
+                                style={{ padding: '4px 10px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '6px', color: '#8b5cf6', borderColor: '#ddd6fe' }}
+                              >
+                                <Code2 size={13} /> Ver Historial Completo de Ejecuciones →
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
