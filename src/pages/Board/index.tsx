@@ -45,6 +45,11 @@ import { CSS } from '@dnd-kit/utilities';
 import GanttChart from '../../components/Gantt/GanttChart';
 import { useNotification } from '../../contexts/NotificationContext';
 import { ConfirmModal } from '../../components/Modals';
+import DeliverablesManager from '../../components/ProjectControl/DeliverablesManager';
+import RisksManager from '../../components/ProjectControl/RisksManager';
+import type { ProjectRisk } from '../../components/ProjectControl/RisksManager';
+import type { Deliverable } from '../../types/projectControl';
+
 interface Task {
   id: string;
   project_id: string;
@@ -55,6 +60,11 @@ interface Task {
   priority_level?: string;
   internal_project_name?: string;
   phase_id?: string;
+  deliverable_id?: string;
+  is_blocked?: boolean;
+  block_reason?: string;
+  estimated_hours?: number;
+  actual_hours?: number;
   due_date: string;
   due_time: string;
   start_date?: string;
@@ -102,7 +112,9 @@ export default function Board() {
   const [globalInternalProjects, setGlobalInternalProjects] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'kanban' | 'table' | 'gantt'>('kanban');
+  const [viewMode, setViewMode] = useState<'kanban' | 'table' | 'gantt' | 'deliverables' | 'risks'>('kanban');
+  const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
+  const [risks, setRisks] = useState<ProjectRisk[]>([]);
   
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showGanttModal, setShowGanttModal] = useState(false);
@@ -132,14 +144,16 @@ export default function Board() {
         supabase.from('tasks').select('*, profiles(id, full_name, email)').eq('project_id', projectId).order('position'),
         supabase.from('profiles').select('id, full_name, email').order('full_name'),
         supabase.from('tags').select('*').eq('type', 'task').order('name'),
-        supabase.from('tasks').select('internal_project_name').not('internal_project_name', 'is', null)
+        supabase.from('tasks').select('internal_project_name').not('internal_project_name', 'is', null),
+        supabase.from('project_deliverables').select('*').eq('project_id', projectId).order('created_at'),
+        supabase.from('project_risks').select('*, responsible:profiles(id, full_name, email), deliverable:project_deliverables(id, name)').eq('project_id', projectId).order('created_at', { ascending: false })
       ]);
 
       const timeoutPromise = new Promise<any>((_, reject) => 
         setTimeout(() => reject(new Error("Timeout al cargar datos del tablero")), 30000)
       );
 
-      const [projRes, tasksRes, profilesRes, tagsRes, internalProjRes] = await Promise.race([fetchPromise, timeoutPromise]);
+      const [projRes, tasksRes, profilesRes, tagsRes, internalProjRes, delivRes, risksRes] = await Promise.race([fetchPromise, timeoutPromise]);
 
       if (projRes.data) setProject(projRes.data);
       if (tasksRes.data) {
@@ -157,6 +171,8 @@ export default function Board() {
       }
       if (profilesRes.data) setAllProfiles(profilesRes.data || []);
       if (tagsRes.data) setAllTags(tagsRes.data || []);
+      if (delivRes?.data) setDeliverables(delivRes.data || []);
+      if (risksRes?.data) setRisks(risksRes.data || []);
       if (internalProjRes.data) {
         const uniqueProjects = Array.from(new Set(internalProjRes.data.map((t: any) => t.internal_project_name).filter(Boolean)));
         setGlobalInternalProjects(uniqueProjects as string[]);
@@ -298,6 +314,18 @@ export default function Board() {
             >
               <BarChart3 size={16} /> Gantt
             </button>
+            <button 
+              onClick={() => setViewMode('deliverables')}
+              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'deliverables' ? '#f5f3ff' : 'transparent', color: viewMode === 'deliverables' ? '#7c3aed' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'deliverables' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+            >
+              📦 Entregables ({deliverables.length})
+            </button>
+            <button 
+              onClick={() => setViewMode('risks')}
+              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'risks' ? '#fef2f2' : 'transparent', color: viewMode === 'risks' ? '#dc2626' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'risks' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+            >
+              🛡️ Riesgos ({risks.length})
+            </button>
           </div>
         </div>
 
@@ -353,7 +381,7 @@ export default function Board() {
           >
             <div className="board-container" style={{ padding: 0, height: '100%' }}>
               {COLUMNS.map(col => (
-                <Column key={col.id} id={col.id} title={col.title} color={col.color} tasks={tasks.filter(t => t.status === col.id)} allTags={allTags} onEditTask={handleEditTask} onAddTask={() => handleAddTask(col.id)} />
+                <Column key={col.id} id={col.id} title={col.title} color={col.color} tasks={tasks.filter(t => t.status === col.id)} allTags={allTags} onEditTask={handleEditTask} onAddTask={() => handleAddTask(col.id)} risks={risks} />
               ))}
             </div>
             <DragOverlay dropAnimation={null}>
@@ -383,6 +411,29 @@ export default function Board() {
             project={project}
             onEditTask={handleEditTask}
           />
+        )}
+
+        {viewMode === 'deliverables' && (
+          <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+            <DeliverablesManager
+              projectId={projectId!}
+              deliverables={deliverables}
+              onDeliverablesUpdated={fetchBoardData}
+            />
+          </div>
+        )}
+
+        {viewMode === 'risks' && (
+          <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+            <RisksManager
+              projectId={projectId!}
+              risks={risks}
+              deliverables={deliverables}
+              tasks={tasks}
+              profiles={allProfiles}
+              onRisksUpdated={fetchBoardData}
+            />
+          </div>
         )}
       </div>
 
@@ -445,7 +496,7 @@ export default function Board() {
   );
 }
 
-function Column({ id, title, color, tasks, allTags, onEditTask, onAddTask }: any) {
+function Column({ id, title, color, tasks, allTags, onEditTask, onAddTask, risks = [] }: any) {
   const { setNodeRef } = useDroppable({ id });
 
   return (
@@ -464,7 +515,7 @@ function Column({ id, title, color, tasks, allTags, onEditTask, onAddTask }: any
       <div className="column-content" style={{ padding: '20px' }}>
         <SortableContext id={id} items={tasks.map((t: any) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((task: any) => (
-            <TaskCard key={task.id} task={task} allTags={allTags} onClick={() => onEditTask(task)} />
+            <TaskCard key={task.id} task={task} allTags={allTags} onClick={() => onEditTask(task)} risks={risks} />
           ))}
         </SortableContext>
         
@@ -477,9 +528,15 @@ function Column({ id, title, color, tasks, allTags, onEditTask, onAddTask }: any
   );
 }
 
-function TaskCard({ task, allTags, onClick, isOverlay }: { task: Task, allTags: any[], onClick: () => void, isOverlay?: boolean }) {
+function TaskCard({ task, allTags, onClick, isOverlay, risks = [] }: { task: Task, allTags: any[], onClick: () => void, isOverlay?: boolean, risks?: ProjectRisk[] }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   
+  // Buscar riesgos vinculados a esta tarea o a su entregable
+  const linkedRisks = risks.filter(r => r.task_id === task.id || (task.deliverable_id && r.deliverable_id === task.deliverable_id));
+  const hasCriticalRisk = linkedRisks.some(r => r.severity === 'critical');
+  const hasHighRisk = linkedRisks.some(r => r.severity === 'high');
+  const hasMaterialized = linkedRisks.some(r => r.status === 'materialized') || task.is_blocked;
+
   const style = { 
     transform: CSS.Translate.toString(transform), 
     transition, 
@@ -487,7 +544,9 @@ function TaskCard({ task, allTags, onClick, isOverlay }: { task: Task, allTags: 
     cursor: isOverlay ? 'grabbing' : 'pointer',
     userSelect: 'none' as any,
     WebkitUserSelect: 'none' as any,
-    touchAction: 'none'
+    touchAction: 'none',
+    border: hasMaterialized ? '2px solid #b91c1c' : hasCriticalRisk ? '2px solid #ef4444' : hasHighRisk ? '2px solid #f59e0b' : undefined,
+    background: hasMaterialized ? '#fff5f5' : undefined
   };
   
   const taskTags = allTags.filter(t => (task.label_ids || []).includes(t.id));
@@ -514,6 +573,21 @@ function TaskCard({ task, allTags, onClick, isOverlay }: { task: Task, allTags: 
         if (!isDragging) onClick();
       }}
     >
+      {/* Alertas de Riesgos / Bloqueo en la tarjeta */}
+      {hasMaterialized ? (
+        <div style={{ background: '#b91c1c', color: 'white', fontSize: '0.65rem', fontWeight: 800, padding: '2px 6px', borderRadius: '4px', marginBottom: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          🔒 BLOQUEADA POR RIESGO MATERIALIZADO
+        </div>
+      ) : hasCriticalRisk ? (
+        <div style={{ background: '#fee2e2', color: '#b91c1c', fontSize: '0.65rem', fontWeight: 800, padding: '2px 6px', borderRadius: '4px', marginBottom: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          ⚠️ RIESGO CRÍTICO
+        </div>
+      ) : hasHighRisk ? (
+        <div style={{ background: '#fef3c7', color: '#b45309', fontSize: '0.65rem', fontWeight: 800, padding: '2px 6px', borderRadius: '4px', marginBottom: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          ⚡ RIESGO ALTO
+        </div>
+      ) : null}
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
           {taskTags.map(t => (
