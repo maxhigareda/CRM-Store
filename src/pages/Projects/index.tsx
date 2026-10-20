@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import GanttChart from '../../components/Gantt/GanttChart';
 import { useNotification } from '../../contexts/NotificationContext';
+import CreateProjectCommercialModal from '../../components/Modals/CreateProjectCommercialModal';
 
 interface Phase {
   id?: string;
@@ -53,6 +54,7 @@ export default function Projects() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [showCommercialModal, setShowCommercialModal] = useState(false);
   const [showPhaseEditor, setShowPhaseEditor] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   
@@ -343,10 +345,16 @@ export default function Projects() {
     <div>
       <div className="page-header">
         <h1 className="page-title">Proyectos Activos</h1>
-        <button className="btn btn-primary" onClick={() => handleOpenModal()}>
-          <Plus size={16} />
-          Agregar Proyecto
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button className="btn btn-secondary" onClick={() => handleOpenModal()}>
+            <Plus size={16} />
+            Alta Rápida
+          </button>
+          <button className="btn btn-primary" onClick={() => setShowCommercialModal(true)} style={{ background: '#7c3aed', borderColor: '#6d28d9' }}>
+            <Briefcase size={16} />
+            Alta Comercial & PO
+          </button>
+        </div>
       </div>
 
       <div style={{ marginBottom: '24px', display: 'flex', gap: '16px', alignItems: 'center', backgroundColor: 'white', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
@@ -805,6 +813,15 @@ export default function Projects() {
           </div>
         </div>
       )}
+
+      {/* Modal de Alta Comercial con PO y Margen Automático */}
+      <CreateProjectCommercialModal
+        isOpen={showCommercialModal}
+        onClose={() => setShowCommercialModal(false)}
+        onProjectCreated={(newProject) => {
+          setProjects(prev => [newProject, ...prev]);
+        }}
+      />
     </div>
   );
 }
