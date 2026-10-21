@@ -11,8 +11,10 @@ import {
   Mail, 
   Calculator,
   ShieldAlert,
-  ChevronRight,
-  Loader2
+  Loader2,
+  Briefcase,
+  Info,
+  FileText
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -69,7 +71,7 @@ export default function CreateProjectCommercialModal({
   const [newPoDocUrl, setNewPoDocUrl] = useState('');
   const [newPoJustification, setNewPoJustification] = useState('');
 
-  // 1. Cargar datos iniciales
+  // Cargar catálogos
   useEffect(() => {
     if (isOpen) {
       fetchInitialData();
@@ -79,7 +81,7 @@ export default function CreateProjectCommercialModal({
   const fetchInitialData = async () => {
     try {
       const [clientsRes, ratesRes, profilesRes] = await Promise.all([
-        supabase.from('clients').select('id, name, reference_name, email').order('reference_name'),
+        supabase.from('clients').select('id, name, reference_name, email, contacts').order('reference_name'),
         supabase.from('cost_rates_catalog').select('*').order('role_name'),
         supabase.from('profiles').select('id, full_name, email').eq('role', 'admin').order('full_name')
       ]);
@@ -93,7 +95,7 @@ export default function CreateProjectCommercialModal({
     }
   };
 
-  // 2. Al cambiar de cliente, cargar festivos de su sede
+  // Cargar festivos del cliente
   useEffect(() => {
     if (!clientId) {
       setHolidays([]);
@@ -111,7 +113,7 @@ export default function CreateProjectCommercialModal({
     fetchClientHolidays();
   }, [clientId]);
 
-  // 3. Recalcular fecha fin automáticamente
+  // Recalcular fecha fin automáticamente
   useEffect(() => {
     if (startDate && durationWeeks > 0) {
       const workingDays = weeksToWorkingDays(durationWeeks);
@@ -120,7 +122,7 @@ export default function CreateProjectCommercialModal({
     }
   }, [startDate, durationWeeks, holidays]);
 
-  // 4. Cálculos Financieros del Presupuesto
+  // Cálculos de Margen y Costos
   const totalCommittedHours = committedResources.reduce((acc, curr) => acc + (Number(curr.hours) || 0), 0);
   const totalEstimatedCost = committedResources.reduce((acc, curr) => acc + ((Number(curr.hours) || 0) * (Number(curr.rate) || 0)), 0);
   const calculatedMarginMoney = quotedBudget > 0 ? (quotedBudget - totalEstimatedCost) : 0;
@@ -128,7 +130,6 @@ export default function CreateProjectCommercialModal({
   const totalPosAmount = pos.reduce((acc, curr) => acc + (Number(curr.po_amount) || 0), 0);
   const poMismatch = quotedBudget > 0 && totalPosAmount > 0 && Math.abs(totalPosAmount - quotedBudget) > 1.0;
 
-  // Agregar recurso comprometido a la propuesta
   const handleAddResource = (rateItem: CostRateItem) => {
     setCommittedResources(prev => [
       ...prev,
@@ -153,7 +154,6 @@ export default function CreateProjectCommercialModal({
     setCommittedResources(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Agregar Orden de Compra (PO)
   const handleAddPo = () => {
     if (!newPoNumber.trim() || newPoAmount <= 0) {
       showNotification('error', 'Ingresa un número de PO y un monto válido.');
@@ -183,7 +183,6 @@ export default function CreateProjectCommercialModal({
     setNewPoJustification('');
   };
 
-  // Guardar Proyecto Completo
   const handleSubmitProject = async () => {
     if (!name.trim()) return showNotification('error', 'El nombre del proyecto es obligatorio');
     if (!clientId) return showNotification('error', 'Selecciona un cliente');
@@ -192,7 +191,6 @@ export default function CreateProjectCommercialModal({
 
     setLoading(true);
     try {
-      // 1. Insertar Proyecto
       const { data: projectData, error: projErr } = await supabase
         .from('projects')
         .insert([{
@@ -223,17 +221,15 @@ export default function CreateProjectCommercialModal({
 
       if (projErr) throw projErr;
 
-      // 2. Insertar POs vinculadas
       if (pos.length > 0) {
         const posToInsert = pos.map(p => ({
           ...p,
           project_id: projectData.id
         }));
-        const { error: posErr } = await supabase.from('project_pos').insert(posToInsert);
-        if (posErr) console.error('Error insertando POs:', posErr);
+        await supabase.from('project_pos').insert(posToInsert);
       }
 
-      showNotification('success', `Proyecto "${name}" dado de alta exitosamente con margen estimado del ${calculatedMarginPct.toFixed(1)}%`);
+      showNotification('success', `Proyecto "${name}" dado de alta con margen proyectado del ${calculatedMarginPct.toFixed(1)}%`);
       onProjectCreated(projectData);
       onClose();
     } catch (err: any) {
@@ -246,634 +242,628 @@ export default function CreateProjectCommercialModal({
 
   if (!isOpen) return null;
 
+  const selectedClientObj = clients.find(c => c.id === clientId);
+
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(15, 23, 42, 0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1100,
-      padding: '20px'
-    }}>
-      <div style={{
-        background: 'white',
-        borderRadius: '20px',
-        width: '840px',
-        maxWidth: '96%',
-        maxHeight: '92vh',
-        boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden'
-      }}>
+    <div className="modal-overlay">
+      <div className="modal-content wide">
         
-        {/* Header Modal */}
-        <div style={{
-          padding: '20px 28px',
-          background: '#f8fafc',
-          borderBottom: '1px solid #e2e8f0',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 800, color: '#0f172a' }}>
-              Alta Comercial de Proyecto
-            </h2>
-            <p style={{ margin: '2px 0 0', fontSize: '0.85rem', color: '#64748b' }}>
-              Control interno: Cotización, margen automático, stakeholder y cronograma con festivos
-            </p>
+        {/* Header con el mismo Look and Feel de Alta Rápida */}
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{ background: '#7c3aed', color: 'white', padding: '12px', borderRadius: '16px' }}>
+              <Briefcase size={28} />
+            </div>
+            <div>
+              <h2 className="modal-title" style={{ fontSize: '1.75rem', fontWeight: 800, color: '#0f172a' }}>
+                Alta Comercial & Control Interno
+              </h2>
+              <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                Configuración completa de cotización, margen proyectado, stakeholder y POs
+              </div>
+            </div>
           </div>
-          <button 
-            onClick={onClose}
-            style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#94a3b8' }}
-          >
-            <X size={20} />
-          </button>
+
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <button 
+              type="button" 
+              className="btn btn-secondary" 
+              style={{ padding: '12px 24px', borderRadius: '14px' }} 
+              onClick={onClose}
+            >
+              Cancelar
+            </button>
+            <button 
+              type="button" 
+              disabled={loading}
+              className="btn btn-primary" 
+              style={{ 
+                padding: '12px 32px', 
+                borderRadius: '14px', 
+                background: '#7c3aed',
+                borderColor: '#6d28d9',
+                boxShadow: '0 10px 15px -3px rgba(124, 58, 237, 0.3)' 
+              }} 
+              onClick={handleSubmitProject}
+            >
+              {loading ? <Loader2 size={18} className="animate-spin" /> : <FileCheck size={18} />}
+              <span>Dar de Alta Proyecto</span>
+            </button>
+            <div style={{ width: '1px', height: '32px', background: 'var(--border-color)', margin: '0 8px' }}></div>
+            <button 
+              type="button" 
+              className="modal-close" 
+              style={{ background: '#f1f5f9', padding: '8px', borderRadius: '12px', cursor: 'pointer' }} 
+              onClick={onClose}
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
-        {/* Stepper Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', background: '#ffffff' }}>
+        {/* Barra de Pasos / Secciones */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', background: '#f8fafc', padding: '0 32px' }}>
           <button
             onClick={() => setActiveStep(1)}
             style={{
-              flex: 1,
-              padding: '12px',
+              padding: '14px 24px',
               border: 'none',
-              background: activeStep === 1 ? '#f5f3ff' : 'transparent',
-              borderBottom: activeStep === 1 ? '3px solid #8b5cf6' : 'none',
+              background: 'transparent',
+              borderBottom: activeStep === 1 ? '3px solid #7c3aed' : '3px solid transparent',
               color: activeStep === 1 ? '#7c3aed' : '#64748b',
-              fontWeight: 700,
-              fontSize: '0.85rem',
+              fontWeight: 800,
+              fontSize: '0.9rem',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
               gap: '8px'
             }}
           >
-            <Building2 size={16} /> 1. Datos del Cliente & Alcance
+            <Building2 size={18} /> 1. Cliente & Cronograma Hábil
           </button>
           <button
             onClick={() => setActiveStep(2)}
             style={{
-              flex: 1,
-              padding: '12px',
+              padding: '14px 24px',
               border: 'none',
-              background: activeStep === 2 ? '#f5f3ff' : 'transparent',
-              borderBottom: activeStep === 2 ? '3px solid #8b5cf6' : 'none',
+              background: 'transparent',
+              borderBottom: activeStep === 2 ? '3px solid #7c3aed' : '3px solid transparent',
               color: activeStep === 2 ? '#7c3aed' : '#64748b',
-              fontWeight: 700,
-              fontSize: '0.85rem',
+              fontWeight: 800,
+              fontSize: '0.9rem',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
               gap: '8px'
             }}
           >
-            <Calculator size={16} /> 2. Cotización & Margen Real
+            <Calculator size={18} /> 2. Cotización & Margen Real
           </button>
           <button
             onClick={() => setActiveStep(3)}
             style={{
-              flex: 1,
-              padding: '12px',
+              padding: '14px 24px',
               border: 'none',
-              background: activeStep === 3 ? '#f5f3ff' : 'transparent',
-              borderBottom: activeStep === 3 ? '3px solid #8b5cf6' : 'none',
+              background: 'transparent',
+              borderBottom: activeStep === 3 ? '3px solid #7c3aed' : '3px solid transparent',
               color: activeStep === 3 ? '#7c3aed' : '#64748b',
-              fontWeight: 700,
-              fontSize: '0.85rem',
+              fontWeight: 800,
+              fontSize: '0.9rem',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
               gap: '8px'
             }}
           >
-            <FileCheck size={16} /> 3. POs & Esquema de Cobro
+            <FileCheck size={18} /> 3. Órdenes de Compra (POs) & Modalidad
           </button>
         </div>
 
-        {/* Body Content */}
-        <div style={{ padding: '24px 28px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {/* Body con Grid Amplio (420px panel izquierdo + 1fr panel derecho) */}
+        <div className="modal-body" style={{ background: '#fcfdfe' }}>
           
-          {/* ── STEP 1: Datos Generales y Cronograma ── */}
+          {/* ── PASO 1: CLIENTE, STAKEHOLDER Y CRONOGRAMA ── */}
           {activeStep === 1 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '6px' }}>
-                    NOMBRE DEL PROYECTO *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    placeholder="Ej. Implementación Data Lake Liverpool..."
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem' }}
-                  />
-                </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '460px 1fr', gap: '32px' }}>
+              
+              {/* Columna Izquierda: Datos del Proyecto & Cliente */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                <div className="form-card" style={{ border: '2px solid #e2e8f0', background: 'white' }}>
+                  <div className="card-title" style={{ color: '#1e293b', marginBottom: '24px' }}>
+                    <div style={{ background: '#eff6ff', padding: '6px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '12px' }}>
+                      <Info size={16} style={{ color: '#3b82f6' }} />
+                    </div>
+                    <span style={{ fontSize: '0.9rem' }}>Información Principal</span>
+                  </div>
 
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '6px' }}>
-                    CLIENTE / EMPRESA *
-                  </label>
-                  <select
-                    required
-                    value={clientId}
-                    onChange={e => {
-                      setClientId(e.target.value);
-                      const sel = clients.find(c => c.id === e.target.value);
-                      if (sel && sel.email) setStakeholderEmail(sel.email);
-                      if (sel && sel.name) setClientContactName(sel.name);
-                    }}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', background: 'white' }}
-                  >
-                    <option value="">-- Selecciona un Cliente --</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.reference_name || c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+                  <div className="form-group" style={{ marginBottom: '20px' }}>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>NOMBRE DEL PROYECTO *</label>
+                    <input 
+                      type="text" 
+                      className="form-input" 
+                      value={name} 
+                      onChange={e => setName(e.target.value)} 
+                      placeholder="Nombre comercial del proyecto..."
+                      style={{ fontSize: '1.2rem', fontWeight: 700, padding: '14px 18px', borderRadius: '14px', border: '2px solid #f1f5f9', marginTop: '4px' }} 
+                      required 
+                    />
+                  </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '6px' }}>
-                    CONTACTO PRINCIPAL
-                  </label>
-                  <input
-                    type="text"
-                    value={clientContactName}
-                    onChange={e => setClientContactName(e.target.value)}
-                    placeholder="Ej. Juan Pérez"
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '6px' }}>
-                    STAKEHOLDER POR CORREO (CLIENTE) *
-                  </label>
-                  <div style={{ position: 'relative' }}>
-                    <Mail size={16} color="#94a3b8" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
-                    <input
-                      type="email"
+                  <div className="form-group" style={{ marginBottom: '20px' }}>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>CLIENTE / RAZÓN SOCIAL *</label>
+                    <select 
+                      className="form-input" 
+                      value={clientId} 
+                      onChange={e => {
+                        setClientId(e.target.value);
+                        const sel = clients.find(c => c.id === e.target.value);
+                        if (sel && sel.email) setStakeholderEmail(sel.email);
+                        if (sel && sel.name) setClientContactName(sel.name);
+                      }} 
+                      style={{ padding: '14px', borderRadius: '14px', border: '2px solid #f1f5f9', fontWeight: 600 }}
                       required
-                      value={stakeholderEmail}
-                      onChange={e => setStakeholderEmail(e.target.value)}
-                      placeholder="stakeholder@cliente.com"
-                      style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem' }}
-                    />
+                    >
+                      <option value="">Seleccionar cliente...</option>
+                      {clients.map(c => (
+                        <option key={c.id} value={c.id}>{c.reference_name || c.name}</option>
+                      ))}
+                    </select>
                   </div>
-                </div>
 
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '6px' }}>
-                    PROJECT MANAGER (PM) ASIGNADO
-                  </label>
-                  <select
-                    value={pmId}
-                    onChange={e => setPmId(e.target.value)}
-                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.9rem', background: 'white' }}
-                  >
-                    <option value="">-- Selecciona un PM --</option>
-                    {pms.map(p => (
-                      <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
-                    ))}
-                  </select>
+                  <div className="form-group" style={{ marginBottom: '20px' }}>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>ENCARGADO / CONTACTO PRINCIPAL</label>
+                    <select 
+                      className="form-input" 
+                      value={clientContactName} 
+                      onChange={e => setClientContactName(e.target.value)} 
+                      style={{ padding: '14px', borderRadius: '14px', border: '2px solid #f1f5f9', fontWeight: 600 }}
+                    >
+                      <option value="">Seleccionar encargado...</option>
+                      {selectedClientObj?.name && (
+                        <option value={selectedClientObj.name}>{selectedClientObj.name} (Principal)</option>
+                      )}
+                      {(selectedClientObj?.contacts || []).map((ct: any, i: number) => (
+                        <option key={i} value={ct.name}>{ct.name} ({ct.email})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '20px' }}>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>STAKEHOLDER POR CORREO (CLIENTE) *</label>
+                    <div style={{ position: 'relative' }}>
+                      <Mail size={16} color="#94a3b8" style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)' }} />
+                      <input 
+                        type="email" 
+                        required
+                        className="form-input" 
+                        value={stakeholderEmail} 
+                        onChange={e => setStakeholderEmail(e.target.value)} 
+                        placeholder="stakeholder@cliente.com"
+                        style={{ paddingLeft: '40px', paddingRight: '14px', borderRadius: '14px', border: '2px solid #f1f5f9', fontWeight: 600 }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>PROJECT MANAGER (PM) RESPONSABLE</label>
+                    <select 
+                      className="form-input" 
+                      value={pmId} 
+                      onChange={e => setPmId(e.target.value)} 
+                      style={{ padding: '14px', borderRadius: '14px', border: '2px solid #f1f5f9', fontWeight: 600 }}
+                    >
+                      <option value="">Seleccionar PM asignado...</option>
+                      {pms.map(p => (
+                        <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              {/* Sección Cronograma con Días Hábiles */}
-              <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8b5cf6', fontWeight: 800, fontSize: '0.85rem' }}>
-                  <Calendar size={18} /> CRONOGRAMA HÁBIL INTELIGENTE (SEDE CLIENTE)
-                </div>
-                
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px' }}>
-                  <div>
-                    <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: '4px' }}>
-                      FECHA DE ARRANQUE (KICK-OFF)
-                    </label>
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={e => setStartDate(e.target.value)}
-                      style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                    />
+              {/* Columna Derecha: Cronograma Hábil Inteligente */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                <div className="form-card" style={{ border: '2px solid #e2e8f0', background: 'white' }}>
+                  <div className="card-title" style={{ color: '#1e293b', marginBottom: '24px' }}>
+                    <div style={{ background: '#f5f3ff', padding: '6px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '12px' }}>
+                      <Calendar size={16} style={{ color: '#7c3aed' }} />
+                    </div>
+                    <span style={{ fontSize: '0.9rem' }}>Cronograma de Ejecución (Días Hábiles & Festivos)</span>
                   </div>
 
-                  <div>
-                    <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: '4px' }}>
-                      DURACIÓN (SEMANAS COTIZADAS)
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      value={durationWeeks}
-                      onChange={e => setDurationWeeks(Number(e.target.value))}
-                      style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                    />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>FECHA DE KICK OFF (INICIO)</label>
+                      <input 
+                        type="date" 
+                        className="form-input" 
+                        value={startDate} 
+                        onChange={e => setStartDate(e.target.value)} 
+                        style={{ padding: '14px', borderRadius: '14px', border: '2px solid #f1f5f9', fontWeight: 600 }}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>TIEMPO COTIZADO (SEMANAS)</label>
+                      <input 
+                        type="number" 
+                        min={1} 
+                        className="form-input" 
+                        value={durationWeeks} 
+                        onChange={e => setDurationWeeks(Number(e.target.value))} 
+                        style={{ padding: '14px', borderRadius: '14px', border: '2px solid #f1f5f9', fontWeight: 700 }}
+                      />
+                    </div>
                   </div>
 
-                  <div>
-                    <label style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: '4px' }}>
-                      FECHA FIN CALCULADA (HÁBILES)
-                    </label>
-                    <input
-                      type="date"
-                      disabled
-                      value={calculatedEndDate}
-                      style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#f1f5f9', fontWeight: 700, color: '#0f172a', fontSize: '0.85rem' }}
-                    />
+                  {/* Resumen Visual del Cálculo de Días */}
+                  <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '16px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#475569' }}>Fecha de Cierre Calculada (Línea Base 1):</span>
+                      <span style={{ fontSize: '1.15rem', fontWeight: 800, color: '#7c3aed' }}>{calculatedEndDate || 'Calculando...'}</span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '20px', fontSize: '0.8rem', color: '#64748b', borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
+                      <div>⚡ <strong>{weeksToWorkingDays(durationWeeks)}</strong> días hábiles netos de trabajo.</div>
+                      <div>🏖️ <strong>{holidays.length}</strong> festivos de sede cliente descontados.</div>
+                    </div>
                   </div>
-                </div>
 
-                <div style={{ fontSize: '0.75rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span>✓ {weeksToWorkingDays(durationWeeks)} días hábiles de trabajo calculados.</span>
-                  {holidays.length > 0 && (
-                    <span style={{ color: '#8b5cf6', fontWeight: 600 }}>• Se omitieron {holidays.length} festivos de la sede del cliente.</span>
-                  )}
-                </div>
-              </div>
+                  {/* Enlaces Google Drive */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>LINK DE PROPUESTA (GOOGLE DRIVE)</label>
+                      <input 
+                        type="url" 
+                        className="form-input" 
+                        value={proposalUrl} 
+                        onChange={e => setProposalUrl(e.target.value)} 
+                        placeholder="https://drive.google.com/..." 
+                        style={{ padding: '14px', borderRadius: '14px', border: '2px solid #f1f5f9' }}
+                      />
+                    </div>
 
-              {/* Enlaces a Drive */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '6px' }}>
-                    LINK PROPUESTA / CONTRATO (GOOGLE DRIVE)
-                  </label>
-                  <input
-                    type="url"
-                    value={proposalUrl}
-                    onChange={e => setProposalUrl(e.target.value)}
-                    placeholder="https://drive.google.com/..."
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '6px' }}>
-                    CARPETA DEL PROYECTO (GOOGLE DRIVE)
-                  </label>
-                  <input
-                    type="url"
-                    value={googleDriveFolderUrl}
-                    onChange={e => setGoogleDriveFolderUrl(e.target.value)}
-                    placeholder="https://drive.google.com/drive/folders/..."
-                    style={{ width: '100%', padding: '9px 12px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                  />
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>CARPETA DEL PROYECTO (DRIVE)</label>
+                      <input 
+                        type="url" 
+                        className="form-input" 
+                        value={googleDriveFolderUrl} 
+                        onChange={e => setGoogleDriveFolderUrl(e.target.value)} 
+                        placeholder="https://drive.google.com/drive/folders/..." 
+                        style={{ padding: '14px', borderRadius: '14px', border: '2px solid #f1f5f9' }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ── STEP 2: Cotización y Margen Automático ── */}
+          {/* ── PASO 2: COTIZACIÓN Y CÁLCULO DE MARGEN AUTOMÁTICO ── */}
           {activeStep === 2 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              {/* Presupuesto Total y Margen Meta */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '6px' }}>
-                    MONTO TOTAL VENDIDO (COTIZACIÓN MXN) *
-                  </label>
-                  <div style={{ position: 'relative' }}>
-                    <DollarSign size={16} color="#94a3b8" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      step={100}
-                      value={quotedBudget || ''}
-                      onChange={e => setQuotedBudget(Number(e.target.value))}
-                      placeholder="0.00"
-                      style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '1rem', fontWeight: 700 }}
-                    />
+            <div style={{ display: 'grid', gridTemplateColumns: '460px 1fr', gap: '32px' }}>
+              
+              {/* Presupuesto y Margen Meta */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                <div className="form-card" style={{ border: '2px solid #e2e8f0', background: 'white' }}>
+                  <div className="card-title" style={{ color: '#1e293b', marginBottom: '24px' }}>
+                    <div style={{ background: '#ecfdf5', padding: '6px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '12px' }}>
+                      <DollarSign size={16} style={{ color: '#10b981' }} />
+                    </div>
+                    <span style={{ fontSize: '0.9rem' }}>Venta y Margen Objetivo</span>
                   </div>
-                </div>
 
-                <div>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '6px' }}>
-                    MARGEN META OBJETIVO (%)
-                  </label>
-                  <div style={{ position: 'relative' }}>
-                    <Percent size={16} color="#94a3b8" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={targetMarginPct}
-                      onChange={e => setTargetMarginPct(Number(e.target.value))}
-                      style={{ width: '100%', padding: '10px 12px 10px 36px', borderRadius: '10px', border: '1px solid #cbd5e1', fontSize: '1rem', fontWeight: 700 }}
-                    />
+                  <div className="form-group" style={{ marginBottom: '20px' }}>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>MONTO TOTAL VENDIDO (COTIZACIÓN MXN) *</label>
+                    <div style={{ position: 'relative' }}>
+                      <DollarSign size={18} color="#94a3b8" style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)' }} />
+                      <input 
+                        type="number" 
+                        required
+                        min={0}
+                        step={500}
+                        className="form-input" 
+                        value={quotedBudget || ''} 
+                        onChange={e => setQuotedBudget(Number(e.target.value))} 
+                        placeholder="0.00"
+                        style={{ fontSize: '1.25rem', fontWeight: 800, paddingLeft: '40px', borderRadius: '14px', border: '2px solid #f1f5f9' }} 
+                      />
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              {/* Tarjeta de Cálculo de Margen Automático */}
-              <div style={{
-                background: calculatedMarginPct >= targetMarginPct ? '#f0fdf4' : '#fff7ed',
-                border: `1px solid ${calculatedMarginPct >= targetMarginPct ? '#bbf7d0' : '#fed7aa'}`,
-                padding: '16px 20px',
-                borderRadius: '14px',
-                display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
-                gap: '12px'
-              }}>
-                <div>
-                  <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b' }}>TOTAL HORAS COMPROMETIDAS</div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>{totalCommittedHours} hrs</div>
-                </div>
-
-                <div>
-                  <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b' }}>COSTO ESTIMADO ROL</div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#dc2626' }}>${totalEstimatedCost.toLocaleString('es-MX')}</div>
-                </div>
-
-                <div>
-                  <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b' }}>MARGEN ESTIMADO ($)</div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 800, color: calculatedMarginMoney >= 0 ? '#16a34a' : '#dc2626' }}>
-                    ${calculatedMarginMoney.toLocaleString('es-MX')}
+                  <div className="form-group" style={{ marginBottom: '24px' }}>
+                    <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>MARGEN META ESPERADO (%)</label>
+                    <div style={{ position: 'relative' }}>
+                      <Percent size={18} color="#94a3b8" style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)' }} />
+                      <input 
+                        type="number" 
+                        min={0}
+                        max={100}
+                        className="form-input" 
+                        value={targetMarginPct} 
+                        onChange={e => setTargetMarginPct(Number(e.target.value))} 
+                        style={{ fontSize: '1.25rem', fontWeight: 800, paddingLeft: '40px', borderRadius: '14px', border: '2px solid #f1f5f9' }} 
+                      />
+                    </div>
                   </div>
-                </div>
 
-                <div>
-                  <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b' }}>% MARGEN CALCULADO</div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 800, color: calculatedMarginPct >= targetMarginPct ? '#16a34a' : '#d97706' }}>
-                    {calculatedMarginPct.toFixed(1)}%
+                  {/* Semáforo de Rentabilidad Proyectada */}
+                  <div style={{
+                    padding: '20px',
+                    borderRadius: '16px',
+                    background: calculatedMarginPct >= targetMarginPct ? '#f0fdf4' : '#fff7ed',
+                    border: `2px solid ${calculatedMarginPct >= targetMarginPct ? '#bbf7d0' : '#fed7aa'}`
+                  }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#64748b', marginBottom: '8px' }}>PROYECCIÓN EN TIEMPO REAL</div>
+                    
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '0.9rem', color: '#334155', fontWeight: 700 }}>Margen Neto ($):</span>
+                      <span style={{ fontSize: '1.4rem', fontWeight: 900, color: calculatedMarginMoney >= 0 ? '#15803d' : '#b91c1c' }}>
+                        ${calculatedMarginMoney.toLocaleString('es-MX')}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <span style={{ fontSize: '0.9rem', color: '#334155', fontWeight: 700 }}>Margen Porcentual (%):</span>
+                      <span style={{ fontSize: '1.4rem', fontWeight: 900, color: calculatedMarginPct >= targetMarginPct ? '#15803d' : '#c2410c' }}>
+                        {calculatedMarginPct.toFixed(1)}%
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Desglose de Horas y Roles Comprometidos */}
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569' }}>
-                    HORAS COMPROMETIDAS POR RECURSO / ROL EN PROPUESTA:
-                  </label>
-                  <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                    Multiplicado por el tabulador de roles
-                  </div>
-                </div>
-
-                {/* Botones rápidos para agregar rol */}
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
-                  {costRates.map(item => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => handleAddResource(item)}
-                      style={{
-                        padding: '4px 10px',
-                        fontSize: '0.75rem',
-                        borderRadius: '6px',
-                        border: '1px solid #cbd5e1',
-                        background: 'white',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px'
-                      }}
-                    >
-                      <Plus size={12} /> {item.role_name} (${item.hourly_rate_estimated}/h)
-                    </button>
-                  ))}
-                </div>
-
-                {/* Lista de Recursos Comprometidos */}
-                {committedResources.length === 0 ? (
-                  <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '10px', border: '1px dashed #cbd5e1', textAlign: 'center', fontSize: '0.8rem', color: '#94a3b8' }}>
-                    Agrega los roles y las horas cotizadas arriba para calcular el margen automático.
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {committedResources.map((res, idx) => (
-                      <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 40px', gap: '10px', alignItems: 'center', background: '#f8fafc', padding: '8px 12px', borderRadius: '8px' }}>
-                        <div style={{ fontWeight: 600, fontSize: '0.85rem', color: '#1e293b' }}>{res.role_name}</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Horas:</span>
-                          <input
-                            type="number"
-                            min={1}
-                            value={res.hours}
-                            onChange={e => handleUpdateResourceHours(idx, Number(e.target.value))}
-                            style={{ width: '80px', padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                          />
-                        </div>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#334155' }}>
-                          Subtotal: ${(res.hours * res.rate).toLocaleString('es-MX')}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveResource(idx)}
-                          style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer' }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                <div className="form-card" style={{ border: '2px solid #e2e8f0', background: 'white' }}>
+                  <div className="card-title" style={{ color: '#1e293b', marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <div style={{ background: '#f5f3ff', padding: '6px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '12px' }}>
+                        <Calculator size={16} style={{ color: '#7c3aed' }} />
                       </div>
+                      <span style={{ fontSize: '0.9rem' }}>Horas Comprometidas en la Propuesta por Rol</span>
+                    </div>
+                    <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 700 }}>Total: {totalCommittedHours} hrs</span>
+                  </div>
+
+                  {/* Botones de roles para agregar con un clic */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
+                    {costRates.map(item => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handleAddResource(item)}
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          borderRadius: '8px',
+                          border: '1px solid #cbd5e1',
+                          background: '#f8fafc',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <Plus size={12} color="#7c3aed" /> {item.role_name} (${item.hourly_rate_estimated}/h)
+                      </button>
                     ))}
                   </div>
-                )}
+
+                  {/* Tabla de Horas Cotizadas */}
+                  {committedResources.length === 0 ? (
+                    <div style={{ padding: '32px', background: '#f8fafc', borderRadius: '14px', border: '2px dashed #cbd5e1', textAlign: 'center', color: '#94a3b8' }}>
+                      Agrega los roles comprometidos arriba para calcular el costo y margen automático.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {committedResources.map((res, idx) => (
+                        <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.4fr 120px 1fr 40px', gap: '12px', alignItems: 'center', background: '#f8fafc', padding: '12px 16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                          <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0f172a' }}>{res.role_name}</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <input 
+                              type="number"
+                              min={1}
+                              value={res.hours}
+                              onChange={e => handleUpdateResourceHours(idx, Number(e.target.value))}
+                              style={{ width: '80px', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 700 }}
+                            />
+                            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>hrs</span>
+                          </div>
+                          <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#334155', textAlign: 'right' }}>
+                            ${(res.hours * res.rate).toLocaleString('es-MX')}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveResource(idx)}
+                            style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', padding: '4px' }}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
 
-          {/* ── STEP 3: POs y Esquema de Facturación ── */}
+          {/* ── PASO 3: POs Y ESQUEMA DE FACTURACIÓN ── */}
           {activeStep === 3 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-              {/* Esquema de Pagos */}
-              <div style={{ background: '#f8fafc', padding: '14px 18px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569', display: 'block', marginBottom: '8px' }}>
-                  MODALIDAD DE PAGO DEL PROYECTO *
-                </label>
-                <div style={{ display: 'flex', gap: '20px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-                    <input
-                      type="radio"
-                      name="payment_scheme"
-                      checked={paymentScheme === 'por_entregables'}
-                      onChange={() => setPaymentScheme('por_entregables')}
-                    />
-                    Por Entregables (Hitos de Facturación)
-                  </label>
+            <div style={{ display: 'grid', gridTemplateColumns: '460px 1fr', gap: '32px' }}>
+              
+              {/* Modalidad de Cobro */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                <div className="form-card" style={{ border: '2px solid #e2e8f0', background: 'white' }}>
+                  <div className="card-title" style={{ color: '#1e293b', marginBottom: '20px' }}>
+                    <div style={{ background: '#f5f3ff', padding: '6px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '12px' }}>
+                      <FileText size={16} style={{ color: '#7c3aed' }} />
+                    </div>
+                    <span style={{ fontSize: '0.9rem' }}>Modalidad de Cobro</span>
+                  </div>
 
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-                    <input
-                      type="radio"
-                      name="payment_scheme"
-                      checked={paymentScheme === 'exhibicion_unica'}
-                      onChange={() => setPaymentScheme('exhibicion_unica')}
-                    />
-                    En una sola exhibición (100% al inicio / cierre)
-                  </label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <label style={{
+                      padding: '16px',
+                      borderRadius: '12px',
+                      border: `2px solid ${paymentScheme === 'por_entregables' ? '#7c3aed' : '#e2e8f0'}`,
+                      background: paymentScheme === 'por_entregables' ? '#f5f3ff' : 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      cursor: 'pointer'
+                    }}>
+                      <input 
+                        type="radio"
+                        name="scheme"
+                        checked={paymentScheme === 'por_entregables'}
+                        onChange={() => setPaymentScheme('por_entregables')}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.9rem' }}>Facturación por Entregables</div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Cada factura se detona al aprobar un paquete de trabajo</div>
+                      </div>
+                    </label>
+
+                    <label style={{
+                      padding: '16px',
+                      borderRadius: '12px',
+                      border: `2px solid ${paymentScheme === 'exhibicion_unica' ? '#7c3aed' : '#e2e8f0'}`,
+                      background: paymentScheme === 'exhibicion_unica' ? '#f5f3ff' : 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      cursor: 'pointer'
+                    }}>
+                      <input 
+                        type="radio"
+                        name="scheme"
+                        checked={paymentScheme === 'exhibicion_unica'}
+                        onChange={() => setPaymentScheme('exhibicion_unica')}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 800, color: '#0f172a', fontSize: '0.9rem' }}>Una Sola Exhibición</div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>100% de la cotización facturada al inicio o entrega final</div>
+                      </div>
+                    </label>
+                  </div>
                 </div>
               </div>
 
               {/* Registro de Múltiples Órdenes de Compra (POs) */}
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569' }}>
-                    ÓRDENES DE COMPRA (PO) DEL CLIENTE:
-                  </label>
-                  <span style={{ fontSize: '0.75rem', color: poMismatch ? '#dc2626' : '#16a34a', fontWeight: 700 }}>
-                    Total POs: ${totalPosAmount.toLocaleString('es-MX')} / Cotizado: ${quotedBudget.toLocaleString('es-MX')}
-                  </span>
-                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                <div className="form-card" style={{ border: '2px solid #e2e8f0', background: 'white' }}>
+                  <div className="card-title" style={{ color: '#1e293b', marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <div style={{ background: '#eff6ff', padding: '6px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '12px' }}>
+                        <FileCheck size={16} style={{ color: '#3b82f6' }} />
+                      </div>
+                      <span style={{ fontSize: '0.9rem' }}>Órdenes de Compra (POs) del Cliente</span>
+                    </div>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 800, color: poMismatch ? '#dc2626' : '#16a34a' }}>
+                      Total POs: ${totalPosAmount.toLocaleString('es-MX')} / Cotizado: ${quotedBudget.toLocaleString('es-MX')}
+                    </span>
+                  </div>
 
-                {/* Formulario para añadir PO */}
-                <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1.5fr', gap: '10px' }}>
-                    <div>
-                      <input
-                        type="text"
-                        placeholder="N° de PO (Ej. PO-4500918)"
-                        value={newPoNumber}
-                        onChange={e => setNewPoNumber(e.target.value)}
-                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                      />
+                  {/* Formulario Nueva PO */}
+                  <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1.5fr', gap: '12px' }}>
+                      <div>
+                        <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8' }}>NÚMERO DE PO</label>
+                        <input 
+                          type="text" 
+                          placeholder="Ej. PO-980122" 
+                          className="form-input" 
+                          value={newPoNumber} 
+                          onChange={e => setNewPoNumber(e.target.value)} 
+                          style={{ padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontWeight: 700 }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8' }}>MONTO DE LA PO ($)</label>
+                        <input 
+                          type="number" 
+                          placeholder="0.00" 
+                          className="form-input" 
+                          value={newPoAmount || ''} 
+                          onChange={e => setNewPoAmount(Number(e.target.value))} 
+                          style={{ padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1', fontWeight: 700 }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8' }}>DOCUMENTO DRIVE (OPCIONAL)</label>
+                        <input 
+                          type="url" 
+                          placeholder="https://drive..." 
+                          className="form-input" 
+                          value={newPoDocUrl} 
+                          onChange={e => setNewPoDocUrl(e.target.value)} 
+                          style={{ padding: '10px', borderRadius: '10px', border: '1px solid #cbd5e1' }}
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <input
-                        type="number"
-                        placeholder="Monto PO ($)"
-                        value={newPoAmount || ''}
-                        onChange={e => setNewPoAmount(Number(e.target.value))}
-                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                      />
-                    </div>
-                    <div>
-                      <input
-                        type="url"
-                        placeholder="Link Documento PO (Drive)"
-                        value={newPoDocUrl}
-                        onChange={e => setNewPoDocUrl(e.target.value)}
-                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
-                      />
+
+                    {/* Validación de discrepancia con justificación obligatoria */}
+                    {quotedBudget > 0 && newPoAmount > 0 && (newPoAmount !== quotedBudget) && (
+                      <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '12px', borderRadius: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#b91c1c', fontWeight: 800, fontSize: '0.75rem', marginBottom: '6px' }}>
+                          <ShieldAlert size={14} /> Discrepancia: El monto de la PO no coincide con la cotización vendida.
+                        </div>
+                        <input 
+                          type="text"
+                          required
+                          placeholder="Justificación obligatoria para el equipo de finanzas *"
+                          value={newPoJustification}
+                          onChange={e => setNewPoJustification(e.target.value)}
+                          style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #fca5a5', fontSize: '0.85rem' }}
+                        />
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button 
+                        type="button" 
+                        onClick={handleAddPo}
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.8rem', padding: '8px 16px', borderRadius: '10px' }}
+                      >
+                        <Plus size={14} /> Registrar PO
+                      </button>
                     </div>
                   </div>
 
-                  {/* Justificación obligatoria si hay discrepancia */}
-                  {quotedBudget > 0 && newPoAmount > 0 && (newPoAmount !== quotedBudget) && (
-                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '10px', borderRadius: '8px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#b91c1c', fontWeight: 700, fontSize: '0.75rem', marginBottom: '4px' }}>
-                        <ShieldAlert size={14} /> El monto de la PO (${newPoAmount.toLocaleString('es-MX')}) no coincide con la cotización (${quotedBudget.toLocaleString('es-MX')}).
-                      </div>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Escribe la justificación para el equipo financiero *"
-                        value={newPoJustification}
-                        onChange={e => setNewPoJustification(e.target.value)}
-                        style={{ width: '100%', padding: '6px 10px', borderRadius: '6px', border: '1px solid #fca5a5', fontSize: '0.8rem' }}
-                      />
+                  {/* Listado de POs */}
+                  {pos.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+                      {pos.map((p, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'white', border: '1px solid #e2e8f0', borderRadius: '12px' }}>
+                          <div>
+                            <strong style={{ fontSize: '0.95rem' }}>{p.po_number}</strong> — <span style={{ color: '#15803d', fontWeight: 800 }}>${p.po_amount.toLocaleString('es-MX')} {p.currency}</span>
+                            {p.is_mismatch_with_quote && (
+                              <div style={{ marginTop: '4px', fontSize: '0.75rem', color: '#dc2626', background: '#fee2e2', padding: '3px 8px', borderRadius: '6px' }}>
+                                Justificación: {p.mismatch_justification}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setPos(pos.filter((_, i) => i !== idx))}
+                            style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', padding: '6px' }}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button
-                      type="button"
-                      onClick={handleAddPo}
-                      className="btn btn-secondary"
-                      style={{ fontSize: '0.8rem', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '6px' }}
-                    >
-                      <Plus size={14} /> Añadir PO a la lista
-                    </button>
-                  </div>
                 </div>
-
-                {/* Lista de POs añadidas */}
-                {pos.length > 0 && (
-                  <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {pos.map((p, idx) => (
-                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 14px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
-                        <div>
-                          <strong>{p.po_number}</strong> — ${p.po_amount.toLocaleString('es-MX')} {p.currency}
-                          {p.is_mismatch_with_quote && (
-                            <span style={{ marginLeft: '8px', fontSize: '0.7rem', color: '#dc2626', background: '#fee2e2', padding: '2px 6px', borderRadius: '4px' }}>
-                              Desviación justificada: {p.mismatch_justification}
-                            </span>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setPos(pos.filter((_, i) => i !== idx))}
-                          style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer' }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           )}
 
-        </div>
-
-        {/* Footer Actions */}
-        <div style={{
-          padding: '16px 28px',
-          background: '#f8fafc',
-          borderTop: '1px solid #e2e8f0',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
-          <div>
-            {activeStep > 1 && (
-              <button
-                type="button"
-                onClick={() => setActiveStep((activeStep - 1) as any)}
-                className="btn btn-secondary"
-                style={{ fontSize: '0.85rem' }}
-              >
-                ← Anterior
-              </button>
-            )}
-          </div>
-
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn btn-secondary"
-              style={{ fontSize: '0.85rem' }}
-            >
-              Cancelar
-            </button>
-
-            {activeStep < 3 ? (
-              <button
-                type="button"
-                onClick={() => setActiveStep((activeStep + 1) as any)}
-                className="btn btn-primary"
-                style={{ fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '6px' }}
-              >
-                Siguiente Paso <ChevronRight size={16} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={loading}
-                onClick={handleSubmitProject}
-                className="btn btn-primary"
-                style={{ fontSize: '0.85rem', background: '#16a34a', borderColor: '#15803d', display: 'flex', alignItems: 'center', gap: '6px' }}
-              >
-                {loading ? <Loader2 size={16} className="animate-spin" /> : <FileCheck size={16} />}
-                Guardar y Dar de Alta Proyecto
-              </button>
-            )}
-          </div>
         </div>
 
       </div>
