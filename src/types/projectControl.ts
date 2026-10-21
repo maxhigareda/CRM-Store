@@ -125,3 +125,70 @@ export interface ProjectRisk {
     name: string;
   };
 }
+
+export interface FacturaItem {
+  id: number;
+  cfdi_uuid?: string;
+  serie?: string;
+  folio?: string;
+  receptor?: string;
+  rfc_receptor?: string;
+  fecha?: string;
+  total: number;
+  moneda?: string;
+  tipo_factura: string;
+}
+
+export interface SustainHandoff {
+  id?: string;
+  project_id: string;
+  is_completed: boolean;
+  support_contract_url?: string;
+  support_quote_url?: string;
+  support_scope_description: string;
+  monitoring_analyst_id?: string;
+  data_eng_changes_scope?: string;
+  pbi_changes_scope?: string;
+  additional_notes?: string;
+  supported_products_census?: string[];
+  documentation_urls?: { title: string; url: string }[];
+  acceptance_act_url?: string;
+  handoff_approved_by?: string;
+  handoff_approved_at?: string;
+  monitoring_analyst?: {
+    id: string;
+    full_name: string;
+    email: string;
+  };
+  approved_by_profile?: {
+    id: string;
+    full_name: string;
+    email: string;
+  };
+}
+
+export interface ProjectChangeRequest {
+  id?: string;
+  project_id: string;
+  change_number: number;
+  requested_by: string;
+  approved_by?: string;
+  reason: string;
+  scope_change_summary?: string;
+  exchanged_deliverable_id?: string;
+  budget_impact: number;
+  time_impact_days: number;
+  status: 'pending' | 'approved' | 'rejected';
+  approved_at?: string;
+  new_baseline_version?: number;
+  created_at?: string;
+  approved_by_profile?: {
+    id: string;
+    full_name: string;
+    email: string;
+  };
+  exchanged_deliverable?: {
+    id: string;
+    name: string;
+  };
+}

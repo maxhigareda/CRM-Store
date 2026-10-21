@@ -52,9 +52,12 @@ import RisksManager from '../../components/ProjectControl/RisksManager';
 import TimesheetManager from '../../components/ProjectControl/TimesheetManager';
 import TeamCapacityManager from '../../components/ProjectControl/TeamCapacityManager';
 import QuickTimeLogModal from '../../components/ProjectControl/QuickTimeLogModal';
+import MilestonesInvoicingManager from '../../components/ProjectControl/MilestonesInvoicingManager';
+import SustainHandoffManager from '../../components/ProjectControl/SustainHandoffManager';
+import ChangeRequestsManager from '../../components/ProjectControl/ChangeRequestsManager';
 import { getCollaboratorWeeklyCapacity } from '../../utils/timeTrackingService';
 import type { ProjectRisk } from '../../components/ProjectControl/RisksManager';
-import type { Deliverable } from '../../types/projectControl';
+import type { Deliverable, ProjectPO } from '../../types/projectControl';
 
 interface Task {
   id: string;
@@ -118,9 +121,10 @@ export default function Board() {
   const [globalInternalProjects, setGlobalInternalProjects] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'kanban' | 'table' | 'gantt' | 'deliverables' | 'risks' | 'timesheet' | 'capacity'>('kanban');
+  const [viewMode, setViewMode] = useState<'kanban' | 'table' | 'gantt' | 'deliverables' | 'risks' | 'timesheet' | 'capacity' | 'invoicing' | 'changes' | 'sustain'>('kanban');
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
   const [risks, setRisks] = useState<ProjectRisk[]>([]);
+  const [pos, setPos] = useState<ProjectPO[]>([]);
   const [quickLogTask, setQuickLogTask] = useState<any | null>(null);
   
   const [showTaskModal, setShowTaskModal] = useState(false);
@@ -153,14 +157,15 @@ export default function Board() {
         supabase.from('tags').select('*').eq('type', 'task').order('name'),
         supabase.from('tasks').select('internal_project_name').not('internal_project_name', 'is', null),
         supabase.from('project_deliverables').select('*').eq('project_id', projectId).order('created_at'),
-        supabase.from('project_risks').select('*, responsible:profiles(id, full_name, email), deliverable:project_deliverables(id, name)').eq('project_id', projectId).order('created_at', { ascending: false })
+        supabase.from('project_risks').select('*, responsible:profiles(id, full_name, email), deliverable:project_deliverables(id, name)').eq('project_id', projectId).order('created_at', { ascending: false }),
+        supabase.from('project_pos').select('*').eq('project_id', projectId).order('created_at')
       ]);
 
       const timeoutPromise = new Promise<any>((_, reject) => 
         setTimeout(() => reject(new Error("Timeout al cargar datos del tablero")), 30000)
       );
 
-      const [projRes, tasksRes, profilesRes, tagsRes, internalProjRes, delivRes, risksRes] = await Promise.race([fetchPromise, timeoutPromise]);
+      const [projRes, tasksRes, profilesRes, tagsRes, internalProjRes, delivRes, risksRes, posRes] = await Promise.race([fetchPromise, timeoutPromise]);
 
       if (projRes.data) setProject(projRes.data);
       if (tasksRes.data) {
@@ -180,6 +185,7 @@ export default function Board() {
       if (tagsRes.data) setAllTags(tagsRes.data || []);
       if (delivRes?.data) setDeliverables(delivRes.data || []);
       if (risksRes?.data) setRisks(risksRes.data || []);
+      if (posRes?.data) setPos(posRes.data || []);
       if (internalProjRes.data) {
         const uniqueProjects = Array.from(new Set(internalProjRes.data.map((t: any) => t.internal_project_name).filter(Boolean)));
         setGlobalInternalProjects(uniqueProjects as string[]);
@@ -343,7 +349,25 @@ export default function Board() {
               onClick={() => setViewMode('capacity')}
               style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'capacity' ? '#f0fdf4' : 'transparent', color: viewMode === 'capacity' ? '#16a34a' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'capacity' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
             >
-              👥 Capacidad Equipo
+              👥 Capacidad
+            </button>
+            <button 
+              onClick={() => setViewMode('invoicing')}
+              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'invoicing' ? '#ecfdf5' : 'transparent', color: viewMode === 'invoicing' ? '#059669' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'invoicing' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+            >
+              💳 Facturación
+            </button>
+            <button 
+              onClick={() => setViewMode('changes')}
+              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'changes' ? '#f5f3ff' : 'transparent', color: viewMode === 'changes' ? '#7c3aed' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'changes' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+            >
+              🔄 Adendas (Línea Base)
+            </button>
+            <button 
+              onClick={() => setViewMode('sustain')}
+              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'sustain' ? '#fff7ed' : 'transparent', color: viewMode === 'sustain' ? '#ea580c' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'sustain' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+            >
+              🚀 Pase a Sustain
             </button>
           </div>
         </div>
@@ -471,6 +495,39 @@ export default function Board() {
           <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
             <TeamCapacityManager
               profiles={allProfiles}
+            />
+          </div>
+        )}
+
+        {viewMode === 'invoicing' && (
+          <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+            <MilestonesInvoicingManager
+              projectId={projectId!}
+              project={project}
+              deliverables={deliverables}
+              pos={pos}
+              onDataUpdated={fetchBoardData}
+            />
+          </div>
+        )}
+
+        {viewMode === 'changes' && (
+          <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+            <ChangeRequestsManager
+              projectId={projectId!}
+              project={project}
+              deliverables={deliverables}
+              onDataUpdated={fetchBoardData}
+            />
+          </div>
+        )}
+
+        {viewMode === 'sustain' && (
+          <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+            <SustainHandoffManager
+              projectId={projectId!}
+              profiles={allProfiles}
+              onHandoffUpdated={fetchBoardData}
             />
           </div>
         )}
