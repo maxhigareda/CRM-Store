@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { 
   Plus, 
   Search, 
+  ArrowLeft, 
   X, 
   Trash2, 
   MessageSquare, 
@@ -23,7 +24,8 @@ import {
   Columns as KanbanIcon,
   Timer,
   AlertTriangle,
-  CheckCircle2
+  CheckCircle2,
+  Calendar
 } from 'lucide-react';
 import { 
   DndContext, 
@@ -55,6 +57,7 @@ import QuickTimeLogModal from '../../components/ProjectControl/QuickTimeLogModal
 import MilestonesInvoicingManager from '../../components/ProjectControl/MilestonesInvoicingManager';
 import SustainHandoffManager from '../../components/ProjectControl/SustainHandoffManager';
 import ChangeRequestsManager from '../../components/ProjectControl/ChangeRequestsManager';
+import ProjectDocumentsView from '../../components/ProjectControl/ProjectDocumentsView';
 import { getCollaboratorWeeklyCapacity } from '../../utils/timeTrackingService';
 import type { ProjectRisk } from '../../components/ProjectControl/RisksManager';
 import type { Deliverable, ProjectPO } from '../../types/projectControl';
@@ -94,6 +97,9 @@ interface Project {
   status?: string;
   clients?: { name: string; reference_name?: string };
   project_phases?: any[];
+  current_baseline_version?: number;
+  google_drive_folder_url?: string;
+  proposal_url?: string;
 }
 
 const COLUMNS = [
@@ -121,11 +127,12 @@ export default function Board() {
   const [globalInternalProjects, setGlobalInternalProjects] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'kanban' | 'table' | 'gantt' | 'deliverables' | 'risks' | 'timesheet' | 'capacity' | 'invoicing' | 'changes' | 'sustain'>('kanban');
+  const [viewMode, setViewMode] = useState<'kanban' | 'table' | 'gantt' | 'deliverables' | 'risks' | 'timesheet' | 'capacity' | 'invoicing' | 'changes' | 'sustain' | 'documents'>('kanban');
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
   const [risks, setRisks] = useState<ProjectRisk[]>([]);
   const [pos, setPos] = useState<ProjectPO[]>([]);
   const [quickLogTask, setQuickLogTask] = useState<any | null>(null);
+  const [taskSearch, setTaskSearch] = useState<string>('');
   
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showGanttModal, setShowGanttModal] = useState(false);
@@ -298,117 +305,364 @@ export default function Board() {
 
   const isHazu = clientData?.name?.toLowerCase().includes('hazu') || clientData?.reference_name?.toLowerCase().includes('hazu');
 
+  const displayedTasks = tasks.filter(t => 
+    !taskSearch.trim() || 
+    t.title.toLowerCase().includes(taskSearch.toLowerCase()) || 
+    (t.description || '').toLowerCase().includes(taskSearch.toLowerCase())
+  );
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#f8fafc' }}>
-      {/* Board Header */}
-      <div className="board-header">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-          <div className="board-menu-top" style={{ margin: 0 }}>
-            <div className="board-menu-item active">Tablero</div>
-            <div className="board-menu-item" onClick={() => setShowGanttModal(true)}>Cronograma</div>
-            <div className="board-menu-item">Documentos</div>
+      {/* 1. Header Principal: Identidad del Proyecto + Acciones Globales */}
+      <div style={{ background: 'white', padding: '24px 32px 16px 32px', borderBottom: '1px solid #f1f5f9' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '20px' }}>
+          
+          {/* Lado Izquierdo: Breadcrumb + Nombre de Proyecto + Cliente */}
+          <div>
+            <Link 
+              to="/projects" 
+              style={{ 
+                display: 'inline-flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 600, 
+                color: '#64748b', 
+                textDecoration: 'none', 
+                marginBottom: '8px' 
+              }}
+            >
+              <ArrowLeft size={14} /> Volver a Proyectos
+            </Link>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h1 style={{ fontSize: '1.9rem', fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.02em' }}>
+                {project.name}
+              </h1>
+              {project.current_baseline_version && (
+                <span style={{ background: '#f5f3ff', color: '#7c3aed', fontSize: '0.75rem', fontWeight: 800, padding: '3px 10px', borderRadius: '8px', border: '1px solid #ddd6fe' }}>
+                  Línea Base {project.current_baseline_version}
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
+              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--primary-color)' }}>
+                {clientData?.reference_name || clientData?.name || 'Cliente'}
+              </span>
+              {clientData?.name && (
+                <>
+                  <span style={{ color: '#cbd5e1' }}>•</span>
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748b' }}>
+                    {clientData.name}
+                  </span>
+                </>
+              )}
+            </div>
           </div>
-          <div style={{ display: 'flex', background: '#f1f5f9', padding: '4px', borderRadius: '12px', gap: '4px' }}>
+
+          {/* Lado Derecho: Buscar + Nueva Tarea arriba, y Cronograma + Estado debajo de Buscar */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px' }}>
+            {/* Fila Superior: Buscar + Botón Nueva Tarea */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={15} style={{ position: 'absolute', left: '12px', top: '11px', color: '#94a3b8' }} />
+                <input 
+                  type="text" 
+                  placeholder="Buscar tareas..." 
+                  className="form-input" 
+                  style={{ paddingLeft: '34px', width: '220px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', height: '36px', fontSize: '0.8rem', marginBottom: 0 }} 
+                  value={taskSearch}
+                  onChange={e => setTaskSearch(e.target.value)}
+                />
+              </div>
+
+              <button 
+                className="btn btn-primary" 
+                style={{ borderRadius: '10px', height: '36px', padding: '0 16px', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }} 
+                onClick={() => handleAddTask('todo')}
+              >
+                <Plus size={16} /> Nueva Tarea
+              </button>
+            </div>
+
+            {/* Fila Inferior (Debajo de Buscar): Cronograma + Estado del Proyecto */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button 
+                type="button"
+                onClick={() => setShowGanttModal(true)}
+                className="btn btn-secondary"
+                style={{ 
+                  borderRadius: '10px', 
+                  height: '34px', 
+                  padding: '0 12px', 
+                  fontSize: '0.75rem', 
+                  fontWeight: 700, 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '6px', 
+                  background: 'white',
+                  border: '1px solid #cbd5e1',
+                  color: '#475569'
+                }}
+              >
+                <Calendar size={14} color="#64748b" /> Ver Cronograma Fases
+              </button>
+
+              {!isHazu && (
+                <select 
+                  className="form-input"
+                  style={{ width: 'auto', minWidth: '140px', height: '34px', padding: '0 10px', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #cbd5e1', background: 'white', color: '#475569', marginBottom: 0 }}
+                  value={project.status === 'Finalizado' || project.status === 'En Pausa' ? project.status : ''}
+                  onChange={async (e) => {
+                    const newStatus = e.target.value;
+                    const { error } = await supabase.from('projects').update({ status: newStatus || 'A tiempo' }).eq('id', project.id);
+                    if (!error) {
+                      setProject({ ...project, status: newStatus || 'A tiempo' });
+                      showNotification('success', 'Estado del proyecto actualizado');
+                    }
+                  }}
+                >
+                  <option value="">Estado automático</option>
+                  <option value="Finalizado">Finalizado</option>
+                  <option value="En Pausa">En Pausa</option>
+                </select>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Barra de Navegación de Vistas (Barra de Pestañas Limpia y Dedicada) */}
+      <div 
+        style={{ 
+          background: 'white', 
+          borderBottom: '1px solid #e2e8f0', 
+          padding: '0 32px', 
+          marginBottom: '20px',
+          overflowX: 'auto',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 'max-content', padding: '10px 0' }}>
+          
+          {/* Bloque 1: Pastillas de Vistas de Tareas */}
+          <div style={{ display: 'flex', background: '#f1f5f9', padding: '3px', borderRadius: '10px', gap: '2px' }}>
             <button 
               onClick={() => setViewMode('kanban')}
-              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'kanban' ? 'white' : 'transparent', color: viewMode === 'kanban' ? 'var(--primary-color)' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'kanban' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '6px 14px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'kanban' ? 'white' : 'transparent', 
+                color: viewMode === 'kanban' ? 'var(--primary-color)' : '#64748b', 
+                cursor: 'pointer', 
+                boxShadow: viewMode === 'kanban' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none' 
+              }}
             >
-              <KanbanIcon size={16} /> Kanban
+              <KanbanIcon size={14} /> Kanban
             </button>
             <button 
               onClick={() => setViewMode('table')}
-              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'table' ? 'white' : 'transparent', color: viewMode === 'table' ? 'var(--primary-color)' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'table' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '6px 14px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'table' ? 'white' : 'transparent', 
+                color: viewMode === 'table' ? 'var(--primary-color)' : '#64748b', 
+                cursor: 'pointer', 
+                boxShadow: viewMode === 'table' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none' 
+              }}
             >
-              <TableIcon size={16} /> Tabla
+              <TableIcon size={14} /> Tabla
             </button>
             <button 
               onClick={() => setViewMode('gantt')}
-              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'gantt' ? 'white' : 'transparent', color: viewMode === 'gantt' ? 'var(--primary-color)' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'gantt' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '6px 14px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'gantt' ? 'white' : 'transparent', 
+                color: viewMode === 'gantt' ? 'var(--primary-color)' : '#64748b', 
+                cursor: 'pointer', 
+                boxShadow: viewMode === 'gantt' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none' 
+              }}
             >
-              <BarChart3 size={16} /> Gantt
+              <BarChart3 size={14} /> Gantt
             </button>
+          </div>
+
+          {/* Separador vertical sutil */}
+          <div style={{ width: '1px', height: '24px', background: '#e2e8f0', margin: '0 6px' }} />
+
+          {/* Bloque 2: Pestañas de Gestión y Control Interno */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <button 
               onClick={() => setViewMode('deliverables')}
-              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'deliverables' ? '#f5f3ff' : 'transparent', color: viewMode === 'deliverables' ? '#7c3aed' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'deliverables' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '7px 12px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'deliverables' ? '#f5f3ff' : 'transparent', 
+                color: viewMode === 'deliverables' ? '#7c3aed' : '#64748b', 
+                cursor: 'pointer' 
+              }}
             >
               📦 Entregables ({deliverables.length})
             </button>
+            
             <button 
               onClick={() => setViewMode('risks')}
-              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'risks' ? '#fef2f2' : 'transparent', color: viewMode === 'risks' ? '#dc2626' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'risks' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '7px 12px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'risks' ? '#fef2f2' : 'transparent', 
+                color: viewMode === 'risks' ? '#dc2626' : '#64748b', 
+                cursor: 'pointer' 
+              }}
             >
               🛡️ Riesgos ({risks.length})
             </button>
+
             <button 
               onClick={() => setViewMode('timesheet')}
-              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'timesheet' ? '#eff6ff' : 'transparent', color: viewMode === 'timesheet' ? '#2563eb' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'timesheet' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '7px 12px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'timesheet' ? '#eff6ff' : 'transparent', 
+                color: viewMode === 'timesheet' ? '#2563eb' : '#64748b', 
+                cursor: 'pointer' 
+              }}
             >
               ⏱️ Timesheet
             </button>
+
             <button 
               onClick={() => setViewMode('capacity')}
-              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'capacity' ? '#f0fdf4' : 'transparent', color: viewMode === 'capacity' ? '#16a34a' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'capacity' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '7px 12px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'capacity' ? '#f0fdf4' : 'transparent', 
+                color: viewMode === 'capacity' ? '#16a34a' : '#64748b', 
+                cursor: 'pointer' 
+              }}
             >
               👥 Capacidad
             </button>
+
             <button 
               onClick={() => setViewMode('invoicing')}
-              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'invoicing' ? '#ecfdf5' : 'transparent', color: viewMode === 'invoicing' ? '#059669' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'invoicing' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '7px 12px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'invoicing' ? '#ecfdf5' : 'transparent', 
+                color: viewMode === 'invoicing' ? '#059669' : '#64748b', 
+                cursor: 'pointer' 
+              }}
             >
               💳 Facturación
             </button>
+
             <button 
               onClick={() => setViewMode('changes')}
-              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'changes' ? '#f5f3ff' : 'transparent', color: viewMode === 'changes' ? '#7c3aed' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'changes' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '7px 12px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'changes' ? '#f5f3ff' : 'transparent', 
+                color: viewMode === 'changes' ? '#7c3aed' : '#64748b', 
+                cursor: 'pointer' 
+              }}
             >
-              🔄 Adendas (Línea Base)
+              🔄 Adendas
             </button>
+
             <button 
               onClick={() => setViewMode('sustain')}
-              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'sustain' ? '#fff7ed' : 'transparent', color: viewMode === 'sustain' ? '#ea580c' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'sustain' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+              style={{ 
+                padding: '7px 12px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'sustain' ? '#fff7ed' : 'transparent', 
+                color: viewMode === 'sustain' ? '#ea580c' : '#64748b', 
+                cursor: 'pointer' 
+              }}
             >
-              🚀 Pase a Sustain
+              🚀 Sustain
             </button>
-          </div>
-        </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-          <div>
-            <h1 style={{ fontSize: '2.5rem', fontWeight: 800, color: '#0f172a', marginBottom: '4px', letterSpacing: '-0.03em' }}>{project.name}</h1>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-              <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--primary-color)' }}>{clientData?.reference_name || clientData?.name || 'Cliente'}</span>
-              <span style={{ color: '#cbd5e1' }}>•</span>
-              <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#64748b' }}>{clientData?.name || 'Sin encargado'}</span>
-            </div>
-          </div>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', marginBottom: '16px' }}>
-            <div style={{ display: 'flex', gap: '12px' }}>
-               <div style={{ position: 'relative' }}>
-                 <Search size={16} style={{ position: 'absolute', left: '12px', top: '11px', color: '#94a3b8' }} />
-                 <input type="text" placeholder="Buscar..." className="form-input" style={{ paddingLeft: '36px', width: '200px', background: 'white', border: '1px solid #e2e8f0', borderRadius: '12px', height: '38px', marginBottom: 0 }} />
-               </div>
-               <button className="btn btn-secondary" style={{ borderRadius: '12px', height: '38px' }} onClick={() => handleAddTask('todo')}><Plus size={16} /> Nueva Tarea</button>
-            </div>
-            {!isHazu && (
-              <select 
-                className="form-input"
-                style={{ width: 'auto', minWidth: '150px', height: '32px', padding: '0 12px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 700, border: '1px solid #e2e8f0', background: 'white', color: '#64748b', marginBottom: 0 }}
-                value={project.status === 'Finalizado' || project.status === 'En Pausa' ? project.status : ''}
-                onChange={async (e) => {
-                  const newStatus = e.target.value;
-                  const { error } = await supabase.from('projects').update({ status: newStatus || 'A tiempo' }).eq('id', project.id);
-                  if (!error) {
-                    setProject({ ...project, status: newStatus || 'A tiempo' });
-                    showNotification('success', 'Estado del proyecto actualizado');
-                  }
-                }}
-              >
-                <option value="">Estado automático</option>
-                <option value="Finalizado">Finalizado</option>
-                <option value="En Pausa">En Pausa</option>
-              </select>
-            )}
+            <button 
+              onClick={() => setViewMode('documents')}
+              style={{ 
+                padding: '7px 12px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'documents' ? '#eff6ff' : 'transparent', 
+                color: viewMode === 'documents' ? '#2563eb' : '#64748b', 
+                cursor: 'pointer' 
+              }}
+            >
+              📄 Documentos
+            </button>
           </div>
         </div>
       </div>
@@ -424,7 +678,7 @@ export default function Board() {
           >
             <div className="board-container" style={{ padding: 0, height: '100%' }}>
               {COLUMNS.map(col => (
-                <Column key={col.id} id={col.id} title={col.title} color={col.color} tasks={tasks.filter(t => t.status === col.id)} allTags={allTags} onEditTask={handleEditTask} onAddTask={() => handleAddTask(col.id)} onOpenTimeLog={(t: any) => setQuickLogTask(t)} risks={risks} />
+                <Column key={col.id} id={col.id} title={col.title} color={col.color} tasks={displayedTasks.filter(t => t.status === col.id)} allTags={allTags} onEditTask={handleEditTask} onAddTask={() => handleAddTask(col.id)} onOpenTimeLog={(t: any) => setQuickLogTask(t)} risks={risks} />
               ))}
             </div>
             <DragOverlay dropAnimation={null}>
@@ -442,7 +696,7 @@ export default function Board() {
 
         {viewMode === 'table' && (
           <TableView 
-            tasks={tasks} 
+            tasks={displayedTasks} 
             onEditTask={handleEditTask} 
             calculateDays={calculateDaysRemaining} 
           />
@@ -450,7 +704,7 @@ export default function Board() {
 
         {viewMode === 'gantt' && (
           <GanttView 
-            tasks={tasks} 
+            tasks={displayedTasks} 
             project={project}
             onEditTask={handleEditTask}
           />
@@ -528,6 +782,17 @@ export default function Board() {
               projectId={projectId!}
               profiles={allProfiles}
               onHandoffUpdated={fetchBoardData}
+            />
+          </div>
+        )}
+
+        {viewMode === 'documents' && (
+          <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+            <ProjectDocumentsView
+              projectId={projectId!}
+              project={project}
+              pos={pos}
+              onDataUpdated={fetchBoardData}
             />
           </div>
         )}
