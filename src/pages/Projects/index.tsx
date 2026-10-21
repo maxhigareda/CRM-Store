@@ -73,6 +73,10 @@ export default function Projects() {
   const [uploadingProposal, setUploadingProposal] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  // Quick Inline Tag State
+  const [newInlineTag, setNewInlineTag] = useState('');
+  const [isCreatingTag, setIsCreatingTag] = useState(false);
+
   // Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -187,10 +191,6 @@ export default function Projects() {
         showNotification('error', 'La duración debe ser al menos de 1 semana');
         return;
       }
-      if (selectedTags.length === 0) {
-        showNotification('error', 'Debes asignar al menos una etiqueta al proyecto');
-        return;
-      }
     }
 
     const projectData = {
@@ -272,6 +272,29 @@ export default function Projects() {
       setSelectedTags(selectedTags.filter(id => id !== tagId));
     } else {
       setSelectedTags([...selectedTags, tagId]);
+    }
+  };
+
+  const handleCreateInlineTag = async (tagName?: string) => {
+    const nameToUse = (tagName || newInlineTag).trim();
+    if (!nameToUse) return;
+    try {
+      const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
+      const randomColor = colors[Math.floor(Math.random() * colors.length)];
+      const { data, error } = await supabase.from('tags').insert([
+        { name: nameToUse, color: randomColor, type: 'project' }
+      ]).select().single();
+
+      if (error) throw error;
+      if (data) {
+        setAllTags(prev => [...prev, data]);
+        setSelectedTags(prev => [...prev, data.id]);
+        setNewInlineTag('');
+        setIsCreatingTag(false);
+        showNotification('success', `Etiqueta #${data.name} creada y seleccionada`);
+      }
+    } catch (err: any) {
+      showNotification('error', 'Error al crear etiqueta: ' + err.message);
     }
   };
 
@@ -630,28 +653,92 @@ export default function Projects() {
                     </div>
 
                     <div>
-                      <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em', display: 'block', marginBottom: '12px' }}>ETIQUETAS</label>
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        {allTags.map(tag => (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em', margin: 0 }}>
+                          ETIQUETAS (OPCIONAL)
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setIsCreatingTag(!isCreatingTag)}
+                          style={{ background: 'transparent', border: 'none', color: '#2563eb', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
+                        >
+                          {isCreatingTag ? '✕ Cancelar' : '+ Nueva etiqueta'}
+                        </button>
+                      </div>
+
+                      {isCreatingTag && (
+                        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                          <input
+                            type="text"
+                            className="form-input"
+                            style={{ height: '36px', borderRadius: '8px', fontSize: '0.8rem', flex: 1, padding: '0 10px' }}
+                            placeholder="Nombre de la etiqueta..."
+                            value={newInlineTag}
+                            onChange={e => setNewInlineTag(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleCreateInlineTag(); } }}
+                            autoFocus
+                          />
                           <button
-                            key={tag.id}
                             type="button"
-                            onClick={() => toggleTag(tag.id)}
-                            style={{
-                              padding: '8px 16px',
-                              borderRadius: '12px',
-                              fontSize: '0.8rem',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              border: selectedTags.includes(tag.id) ? `2px solid ${tag.color}` : '2px solid #f1f5f9',
-                              backgroundColor: selectedTags.includes(tag.id) ? `${tag.color}15` : 'white',
-                              color: selectedTags.includes(tag.id) ? tag.color : '#64748b',
-                              transition: 'all 0.2s'
-                            }}
+                            onClick={() => handleCreateInlineTag()}
+                            className="btn btn-primary"
+                            style={{ padding: '0 14px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700 }}
                           >
-                            #{tag.name}
+                            Crear
                           </button>
-                        ))}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {allTags.length === 0 ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                            <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748b' }}>
+                              Aún no tienes etiquetas creadas. Puedes usar una sugerida o crear una nueva:
+                            </p>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              {['Desarrollo', 'Consultoría', 'Soporte', 'Estratégico'].map(sugg => (
+                                <button
+                                  key={sugg}
+                                  type="button"
+                                  onClick={() => handleCreateInlineTag(sugg)}
+                                  style={{
+                                    padding: '6px 12px',
+                                    borderRadius: '10px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    background: '#eff6ff',
+                                    border: '1px dashed #3b82f6',
+                                    color: '#2563eb',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  + #{sugg}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          allTags.map(tag => (
+                            <button
+                              key={tag.id}
+                              type="button"
+                              onClick={() => toggleTag(tag.id)}
+                              style={{
+                                padding: '8px 16px',
+                                borderRadius: '12px',
+                                fontSize: '0.8rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                border: selectedTags.includes(tag.id) ? `2px solid ${tag.color}` : '2px solid #f1f5f9',
+                                backgroundColor: selectedTags.includes(tag.id) ? `${tag.color}15` : 'white',
+                                color: selectedTags.includes(tag.id) ? tag.color : '#64748b',
+                                transition: 'all 0.2s'
+                              }}
+                            >
+                              #{tag.name}
+                            </button>
+                          ))
+                        )}
                       </div>
                     </div>
                   </div>
