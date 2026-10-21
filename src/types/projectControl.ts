@@ -60,3 +60,68 @@ export interface PaymentMilestone {
   factura_id?: number;
   sat_uuid?: string;
 }
+
+export interface TaskTimeLog {
+  id?: string;
+  task_id: string;
+  profile_id: string;
+  project_id: string;
+  work_date: string;
+  hours_logged: number;
+  description?: string;
+  hourly_rate_snapshot?: number;
+  created_at?: string;
+  updated_at?: string;
+  profile?: {
+    id: string;
+    full_name: string;
+    email: string;
+  };
+  task?: {
+    id: string;
+    title: string;
+  };
+}
+
+export interface ResourceCapacity {
+  profile_id: string;
+  full_name: string;
+  email: string;
+  weekly_target_hours: number;
+  monthly_target_hours: number;
+  real_hourly_cost?: number;
+  weekly_assigned_hours: number;
+  weekly_logged_hours: number;
+  occupancy_pct: number;
+  is_overallocated: boolean;
+  projects_breakdown: {
+    project_id: string;
+    project_name: string;
+    hours: number;
+  }[];
+}
+
+export interface ProjectRisk {
+  id?: string;
+  project_id: string;
+  deliverable_id?: string;
+  task_id?: string;
+  title: string;
+  description?: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  probability: 'low' | 'medium' | 'high';
+  status: 'identified' | 'mitigated' | 'materialized' | 'resolved';
+  mitigation_plan?: string;
+  responsible_id?: string;
+  materialized_impact_summary?: string;
+  created_at?: string;
+  responsible?: {
+    id: string;
+    full_name: string;
+    email: string;
+  };
+  deliverable?: {
+    id: string;
+    name: string;
+  };
+}

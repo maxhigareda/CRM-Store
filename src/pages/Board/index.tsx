@@ -21,7 +21,9 @@ import {
   Table as TableIcon,
   BarChart3,
   Columns as KanbanIcon,
-  Timer
+  Timer,
+  AlertTriangle,
+  CheckCircle2
 } from 'lucide-react';
 import { 
   DndContext, 
@@ -47,6 +49,10 @@ import { useNotification } from '../../contexts/NotificationContext';
 import { ConfirmModal } from '../../components/Modals';
 import DeliverablesManager from '../../components/ProjectControl/DeliverablesManager';
 import RisksManager from '../../components/ProjectControl/RisksManager';
+import TimesheetManager from '../../components/ProjectControl/TimesheetManager';
+import TeamCapacityManager from '../../components/ProjectControl/TeamCapacityManager';
+import QuickTimeLogModal from '../../components/ProjectControl/QuickTimeLogModal';
+import { getCollaboratorWeeklyCapacity } from '../../utils/timeTrackingService';
 import type { ProjectRisk } from '../../components/ProjectControl/RisksManager';
 import type { Deliverable } from '../../types/projectControl';
 
@@ -112,9 +118,10 @@ export default function Board() {
   const [globalInternalProjects, setGlobalInternalProjects] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'kanban' | 'table' | 'gantt' | 'deliverables' | 'risks'>('kanban');
+  const [viewMode, setViewMode] = useState<'kanban' | 'table' | 'gantt' | 'deliverables' | 'risks' | 'timesheet' | 'capacity'>('kanban');
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
   const [risks, setRisks] = useState<ProjectRisk[]>([]);
+  const [quickLogTask, setQuickLogTask] = useState<any | null>(null);
   
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showGanttModal, setShowGanttModal] = useState(false);
@@ -326,6 +333,18 @@ export default function Board() {
             >
               🛡️ Riesgos ({risks.length})
             </button>
+            <button 
+              onClick={() => setViewMode('timesheet')}
+              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'timesheet' ? '#eff6ff' : 'transparent', color: viewMode === 'timesheet' ? '#2563eb' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'timesheet' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+            >
+              ⏱️ Timesheet
+            </button>
+            <button 
+              onClick={() => setViewMode('capacity')}
+              style={{ padding: '8px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', fontWeight: 700, border: 'none', background: viewMode === 'capacity' ? '#f0fdf4' : 'transparent', color: viewMode === 'capacity' ? '#16a34a' : '#64748b', cursor: 'pointer', boxShadow: viewMode === 'capacity' ? '0 2px 4px rgba(0,0,0,0.05)' : 'none' }}
+            >
+              👥 Capacidad Equipo
+            </button>
           </div>
         </div>
 
@@ -381,7 +400,7 @@ export default function Board() {
           >
             <div className="board-container" style={{ padding: 0, height: '100%' }}>
               {COLUMNS.map(col => (
-                <Column key={col.id} id={col.id} title={col.title} color={col.color} tasks={tasks.filter(t => t.status === col.id)} allTags={allTags} onEditTask={handleEditTask} onAddTask={() => handleAddTask(col.id)} risks={risks} />
+                <Column key={col.id} id={col.id} title={col.title} color={col.color} tasks={tasks.filter(t => t.status === col.id)} allTags={allTags} onEditTask={handleEditTask} onAddTask={() => handleAddTask(col.id)} onOpenTimeLog={(t: any) => setQuickLogTask(t)} risks={risks} />
               ))}
             </div>
             <DragOverlay dropAnimation={null}>
@@ -435,6 +454,26 @@ export default function Board() {
             />
           </div>
         )}
+
+        {viewMode === 'timesheet' && (
+          <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+            <TimesheetManager
+              projectId={projectId!}
+              project={project}
+              tasks={tasks}
+              profiles={allProfiles}
+              onDataUpdated={fetchBoardData}
+            />
+          </div>
+        )}
+
+        {viewMode === 'capacity' && (
+          <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+            <TeamCapacityManager
+              profiles={allProfiles}
+            />
+          </div>
+        )}
       </div>
 
       {showTaskModal && (
@@ -450,6 +489,21 @@ export default function Board() {
           clientData={clientData}
           existingInternalProjects={globalInternalProjects}
           projectPhases={project?.project_phases || []}
+          deliverables={deliverables}
+        />
+      )}
+
+      {quickLogTask && (
+        <QuickTimeLogModal
+          isOpen={true}
+          onClose={() => setQuickLogTask(null)}
+          taskId={quickLogTask.id}
+          projectId={projectId!}
+          taskTitle={quickLogTask.title}
+          projectName={project?.name}
+          onLogSaved={() => {
+            fetchBoardData();
+          }}
         />
       )}
 
@@ -496,7 +550,7 @@ export default function Board() {
   );
 }
 
-function Column({ id, title, color, tasks, allTags, onEditTask, onAddTask, risks = [] }: any) {
+function Column({ id, title, color, tasks, allTags, onEditTask, onAddTask, onOpenTimeLog, risks = [] }: any) {
   const { setNodeRef } = useDroppable({ id });
 
   return (
@@ -515,7 +569,7 @@ function Column({ id, title, color, tasks, allTags, onEditTask, onAddTask, risks
       <div className="column-content" style={{ padding: '20px' }}>
         <SortableContext id={id} items={tasks.map((t: any) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((task: any) => (
-            <TaskCard key={task.id} task={task} allTags={allTags} onClick={() => onEditTask(task)} risks={risks} />
+            <TaskCard key={task.id} task={task} allTags={allTags} onClick={() => onEditTask(task)} onOpenTimeLog={onOpenTimeLog} risks={risks} />
           ))}
         </SortableContext>
         
@@ -528,7 +582,7 @@ function Column({ id, title, color, tasks, allTags, onEditTask, onAddTask, risks
   );
 }
 
-function TaskCard({ task, allTags, onClick, isOverlay, risks = [] }: { task: Task, allTags: any[], onClick: () => void, isOverlay?: boolean, risks?: ProjectRisk[] }) {
+function TaskCard({ task, allTags, onClick, onOpenTimeLog, isOverlay, risks = [] }: { task: Task, allTags: any[], onClick: () => void, onOpenTimeLog?: (t: Task) => void, isOverlay?: boolean, risks?: ProjectRisk[] }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   
   // Buscar riesgos vinculados a esta tarea o a su entregable
@@ -619,8 +673,8 @@ function TaskCard({ task, allTags, onClick, isOverlay, risks = [] }: { task: Tas
         <div className="task-desc-preview" style={{ fontSize: '0.8rem', pointerEvents: 'none' }}>{task.description}</div>
       )}
       
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', pointerEvents: 'none' }}>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {task.due_date && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: dateColor, fontSize: '0.7rem', fontWeight: 800 }}>
               <Clock size={12} />
@@ -633,13 +687,59 @@ function TaskCard({ task, allTags, onClick, isOverlay, risks = [] }: { task: Tas
               <span>{task.checklists.completed}/{task.checklists.total}</span>
             </div>
           )}
+          {(task.actual_hours !== undefined || task.estimated_hours !== undefined) && (
+            <div 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '3px', 
+                fontSize: '0.68rem', 
+                background: (task.actual_hours || 0) > (task.estimated_hours || 0) && (task.estimated_hours || 0) > 0 ? '#fee2e2' : '#f1f5f9',
+                color: (task.actual_hours || 0) > (task.estimated_hours || 0) && (task.estimated_hours || 0) > 0 ? '#dc2626' : '#475569', 
+                fontWeight: 700,
+                padding: '1px 6px',
+                borderRadius: '5px'
+              }}
+            >
+              <Timer size={11} />
+              <span>{task.actual_hours || 0}h{task.estimated_hours ? ` / ${task.estimated_hours}h` : ''}</span>
+            </div>
+          )}
         </div>
         
-        {task.assigned_to && (
-          <div className="avatar" style={{ width: '24px', height: '24px', fontSize: '10px', margin: 0, border: 'none', background: '#f1f5f9' }}>
-             {task.profiles?.full_name?.charAt(0) || '?'}
-          </div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {onOpenTimeLog && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenTimeLog(task);
+              }}
+              style={{
+                background: '#eff6ff',
+                border: '1px solid #bfdbfe',
+                color: '#2563eb',
+                borderRadius: '6px',
+                padding: '2px 6px',
+                fontSize: '0.65rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '2px'
+              }}
+              title="Registrar horas rápidamente"
+            >
+              <Clock size={10} /> +Log
+            </button>
+          )}
+
+          {task.assigned_to && (
+            <div className="avatar" style={{ width: '24px', height: '24px', fontSize: '10px', margin: 0, border: 'none', background: '#f1f5f9' }}>
+               {task.profiles?.full_name?.charAt(0) || '?'}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -795,7 +895,7 @@ function GanttView({ tasks, project, onEditTask }: any) {
   );
 }
 
-function TaskModal({ projectId, task, initialStatus, onClose, allTags, setAllTags, profiles, clientName, clientData, existingInternalProjects = [], projectPhases = [] }: any) {
+function TaskModal({ projectId, task, initialStatus, onClose, allTags, setAllTags, profiles, clientName, clientData, existingInternalProjects = [], projectPhases = [], deliverables = [] }: any) {
   const { showNotification } = useNotification();
   const [title, setTitle] = useState(task?.title || '');
   const [description, setDescription] = useState(task?.description || '');
@@ -809,6 +909,12 @@ function TaskModal({ projectId, task, initialStatus, onClose, allTags, setAllTag
   const [internalProjectName, setInternalProjectName] = useState(task?.internal_project_name || '');
   const [phaseId, setPhaseId] = useState(task?.phase_id || '');
   const [showNewInternalInput, setShowNewInternalInput] = useState(!existingInternalProjects.length || (task && task.internal_project_name && !existingInternalProjects.includes(task.internal_project_name)));
+  
+  // Control de Horas, Entregables y Sobreasignación
+  const [estimatedHours, setEstimatedHours] = useState<number | string>(task?.estimated_hours || '');
+  const [deliverableId, setDeliverableId] = useState<string>(task?.deliverable_id || '');
+  const [assignedCapacity, setAssignedCapacity] = useState<any | null>(null);
+  const [showQuickLogModal, setShowQuickLogModal] = useState<boolean>(false);
   
   const nameStr = clientData?.name || clientName || '';
   const refStr = clientData?.reference_name || '';
@@ -853,6 +959,21 @@ function TaskModal({ projectId, task, initialStatus, onClose, allTags, setAllTag
     if (commRes.data) setComments(commRes.data);
   };
 
+  useEffect(() => {
+    if (assignedTo) {
+      const p = profiles.find((prof: any) => prof.id === assignedTo);
+      if (p) {
+        getCollaboratorWeeklyCapacity(p.id, p.full_name || p.email, p.email)
+          .then(cap => setAssignedCapacity(cap))
+          .catch(() => setAssignedCapacity(null));
+      } else {
+        setAssignedCapacity(null);
+      }
+    } else {
+      setAssignedCapacity(null);
+    }
+  }, [assignedTo, profiles]);
+
   const handleSave = async () => {
     const taskData = {
       project_id: projectId,
@@ -867,6 +988,8 @@ function TaskModal({ projectId, task, initialStatus, onClose, allTags, setAllTag
       priority_level: priorityLevel,
       internal_project_name: internalProjectName,
       phase_id: phaseId || null,
+      deliverable_id: deliverableId || null,
+      estimated_hours: parseFloat(String(estimatedHours)) || 0,
     };
 
     let savedTaskId = task?.id;
@@ -1290,6 +1413,77 @@ function TaskModal({ projectId, task, initialStatus, onClose, allTags, setAllTag
                   </div>
                 )}
               </div>
+
+              {/* Alerta de Sobreasignación en tiempo real (Historia 5) */}
+              {assignedTo && assignedCapacity && (
+                assignedCapacity.is_overallocated ? (
+                  <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', padding: '8px 12px', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: '#b91c1c', fontWeight: 700 }}>
+                    <AlertTriangle size={15} color="#dc2626" style={{ flexShrink: 0 }} />
+                    <span>⚠️ Sobreasignado: {assignedCapacity.weekly_assigned_hours}h / 40h ({assignedCapacity.occupancy_pct}% de capacidad esta semana).</span>
+                  </div>
+                ) : (
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '6px 12px', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', color: '#15803d', fontWeight: 600 }}>
+                    <CheckCircle2 size={13} color="#16a34a" style={{ flexShrink: 0 }} />
+                    <span>Capacidad disponible: {assignedCapacity.weekly_assigned_hours}h / 40h asignadas.</span>
+                  </div>
+                )
+              )}
+            </div>
+
+            {/* Entregable Asociado (Historia 3 & 4) */}
+            <div className="form-card" style={{ border: 'none', padding: 0, background: 'transparent' }}>
+              <label style={{ fontSize: '0.6rem', fontWeight: 800, color: '#94a3b8', display: 'block', marginBottom: '6px', letterSpacing: '0.05em' }}>ENTREGABLE DEL PROYECTO</label>
+              <select 
+                className="form-input" 
+                value={deliverableId} 
+                onChange={e => setDeliverableId(e.target.value)}
+                style={{ background: 'white', fontWeight: 700, borderRadius: '10px', height: '42px', padding: '0 12px', fontSize: '0.85rem', width: '100%' }}
+              >
+                <option value="">Sin entregable específico (General)</option>
+                {deliverables.map((deliv: any) => (
+                  <option key={deliv.id} value={deliv.id}>
+                    📦 {deliv.name} ({deliv.weight_pct}%)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Control de Horas (Historia 4) */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="form-card" style={{ border: 'none', padding: 0, background: 'transparent' }}>
+                <label style={{ fontSize: '0.6rem', fontWeight: 800, color: '#94a3b8', display: 'block', marginBottom: '6px', letterSpacing: '0.05em' }}>HORAS ESTIMADAS</label>
+                <div style={{ position: 'relative' }}>
+                  <Clock size={16} style={{ position: 'absolute', left: '12px', top: '13px', color: '#94a3b8' }} />
+                  <input 
+                    type="number" 
+                    step="0.5" 
+                    min="0" 
+                    placeholder="Ej. 16"
+                    className="form-input" 
+                    value={estimatedHours} 
+                    onChange={e => setEstimatedHours(e.target.value)} 
+                    style={{ background: 'white', fontWeight: 700, borderRadius: '10px', height: '42px', paddingLeft: '36px', fontSize: '0.85rem' }} 
+                  />
+                </div>
+              </div>
+              <div className="form-card" style={{ border: 'none', padding: 0, background: 'transparent' }}>
+                <label style={{ fontSize: '0.6rem', fontWeight: 800, color: '#94a3b8', display: 'block', marginBottom: '6px', letterSpacing: '0.05em' }}>HORAS REALES</label>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <div style={{ background: '#f1f5f9', fontWeight: 800, borderRadius: '10px', height: '42px', display: 'flex', alignItems: 'center', padding: '0 14px', fontSize: '0.85rem', color: '#1e293b', flex: 1 }}>
+                    {task?.actual_hours || 0} hrs
+                  </div>
+                  {task?.id && (
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickLogModal(true)}
+                      className="btn"
+                      style={{ height: '42px', borderRadius: '10px', padding: '0 12px', fontSize: '0.75rem', fontWeight: 800, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', whiteSpace: 'nowrap', cursor: 'pointer' }}
+                    >
+                      ⏱️ +Log
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="form-card" style={{ border: 'none', padding: 0, background: 'transparent' }}>
@@ -1486,6 +1680,20 @@ function TaskModal({ projectId, task, initialStatus, onClose, allTags, setAllTag
         onConfirm={confirmDeleteTag}
         onClose={() => setTagToDelete(null)}
       />
+
+      {showQuickLogModal && task?.id && (
+        <QuickTimeLogModal
+          isOpen={true}
+          onClose={() => setShowQuickLogModal(false)}
+          taskId={task.id}
+          projectId={projectId}
+          taskTitle={title || task.title}
+          projectName={clientName}
+          onLogSaved={() => {
+            fetchTaskDetails();
+          }}
+        />
+      )}
     </div>
   );
 }
