@@ -506,6 +506,12 @@ export default function CreateProjectCommercialModal({
                         <option key={c.id} value={c.id}>{c.reference_name || c.name}</option>
                       ))}
                     </select>
+                    {selectedClientObj?.location_country && (
+                      <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: '10px', border: '1px solid #e2e8f0', marginTop: '8px', fontSize: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>📍 Ubicación: <strong>{selectedClientObj.location_country}</strong> ({selectedClientObj.timezone || 'GMT-6'})</span>
+                        <span style={{ color: '#047857', fontWeight: 700 }}>🏖️ Calendario festivos activo</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="form-group" style={{ marginBottom: '20px' }}>

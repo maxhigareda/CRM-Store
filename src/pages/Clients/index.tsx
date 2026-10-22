@@ -1,6 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, X, Edit2 } from 'lucide-react';
+import { Search, Plus, X, Edit2, Globe, Clock, Calendar } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+
+export const COUNTRIES_CATALOG = [
+  { code: 'MX', name: 'México', flag: '🇲🇽', timezone: 'GMT-6 (Hora Central)', holidayRegion: 'Festivos Oficiales México' },
+  { code: 'CO', name: 'Colombia', flag: '🇨🇴', timezone: 'GMT-5 (Hora Bogotá)', holidayRegion: 'Festivos Oficiales Colombia' },
+  { code: 'CL', name: 'Chile', flag: '🇨🇱', timezone: 'GMT-4 / GMT-3 (Santiago)', holidayRegion: 'Festivos Oficiales Chile' },
+  { code: 'PE', name: 'Perú', flag: '🇵🇪', timezone: 'GMT-5 (Hora Lima)', holidayRegion: 'Festivos Oficiales Perú' },
+  { code: 'US', name: 'Estados Unidos', flag: '🇺🇸', timezone: 'GMT-5 a GMT-8 (ET/CT/PT)', holidayRegion: 'Federal Holidays USA' },
+  { code: 'AR', name: 'Argentina', flag: '🇦🇷', timezone: 'GMT-3 (Buenos Aires)', holidayRegion: 'Festivos Oficiales Argentina' },
+  { code: 'ES', name: 'España', flag: '🇪🇸', timezone: 'GMT+1 / GMT+2 (Madrid)', holidayRegion: 'Festivos Oficiales España' },
+  { code: 'CR', name: 'Costa Rica', flag: '🇨🇷', timezone: 'GMT-6 (San José)', holidayRegion: 'Festivos Oficiales Costa Rica' },
+  { code: 'PA', name: 'Panamá', flag: '🇵🇦', timezone: 'GMT-5 (Panamá)', holidayRegion: 'Festivos Oficiales Panamá' },
+  { code: 'GT', name: 'Guatemala', flag: '🇬🇹', timezone: 'GMT-6 (Guatemala)', holidayRegion: 'Festivos Oficiales Guatemala' },
+  { code: 'EC', name: 'Ecuador', flag: '🇪🇨', timezone: 'GMT-5 (Quito)', holidayRegion: 'Festivos Oficiales Ecuador' },
+  { code: 'BR', name: 'Brasil', flag: '🇧🇷', timezone: 'GMT-3 (Brasilia/Sao Paulo)', holidayRegion: 'Feriados Nacionais Brasil' },
+  { code: 'OTRO', name: 'Otro', flag: '🌐', timezone: 'GMT-6 (Por defecto)', holidayRegion: 'Personalizado' }
+];
 
 export default function Clients() {
   const [clients, setClients] = useState<any[]>([]);
@@ -10,6 +26,7 @@ export default function Clients() {
     name: '', 
     reference_name: '', 
     email: '',
+    location_country: 'México',
     contacts: [] as { name: string; email: string }[]
   });
   const [loading, setLoading] = useState(false);
@@ -31,6 +48,7 @@ export default function Clients() {
         name: client.name, 
         reference_name: client.reference_name, 
         email: client.email || '',
+        location_country: client.location_country || 'México',
         contacts: client.contacts || []
       });
     } else {
@@ -39,6 +57,7 @@ export default function Clients() {
         name: '', 
         reference_name: '', 
         email: '',
+        location_country: 'México',
         contacts: []
       });
     }
@@ -68,19 +87,45 @@ export default function Clients() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    
-    if (editingId) {
-      const { error } = await supabase.from('clients').update(newClient).eq('id', editingId);
+
+    const countryObj = COUNTRIES_CATALOG.find(c => c.name === newClient.location_country) || COUNTRIES_CATALOG[0];
+    const fullPayload: any = {
+      name: newClient.name,
+      reference_name: newClient.reference_name,
+      email: newClient.email || null,
+      contacts: newClient.contacts || [],
+      location_country: countryObj.name,
+      country_code: countryObj.code,
+      timezone: countryObj.timezone
+    };
+
+    let currentPayload = { ...fullPayload };
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      let error = null;
+      if (editingId) {
+        const res = await supabase.from('clients').update(currentPayload).eq('id', editingId);
+        error = res.error;
+      } else {
+        const res = await supabase.from('clients').insert([currentPayload]);
+        error = res.error;
+      }
+
       if (!error) {
         setShowModal(false);
         fetchClients();
+        break;
       }
-    } else {
-      const { error } = await supabase.from('clients').insert([newClient]);
-      if (!error) {
-        setShowModal(false);
-        fetchClients();
+
+      const missingMatch = error.message.match(/column "?([^"\s]+)"? of relation "?clients"? does not exist/i) ||
+                           error.message.match(/Could not find the '([^']+)' column/i);
+      if (missingMatch && missingMatch[1] && missingMatch[1] in currentPayload) {
+        delete currentPayload[missingMatch[1]];
+        continue;
       }
+
+      console.error(error);
+      break;
     }
     setLoading(false);
   };
@@ -127,41 +172,60 @@ export default function Clients() {
               <th style={{ width: '40px' }}><input type="checkbox" /></th>
               <th>CONTACTOS</th>
               <th>CLIENTE</th>
+              <th>UBICACIÓN / HUSO HORARIO</th>
               <th>CORREO ELECTRÓNICO</th>
               <th style={{ textAlign: 'right' }}>ACCIONES</th>
             </tr>
           </thead>
           <tbody>
-            {filteredClients.map(client => (
-              <tr key={client.id}>
-                <td><input type="checkbox" /></td>
-                <td>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: '#e0f2fe', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '10px' }}>
-                        {client.name.substring(0, 1).toUpperCase()}
+            {filteredClients.map(client => {
+              const country = COUNTRIES_CATALOG.find(c => c.name === client.location_country || c.code === client.country_code) || COUNTRIES_CATALOG[0];
+
+              return (
+                <tr key={client.id}>
+                  <td><input type="checkbox" /></td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: '#e0f2fe', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '10px' }}>
+                          {client.name.substring(0, 1).toUpperCase()}
+                        </div>
+                        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{client.name}</span>
                       </div>
-                      <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{client.name}</span>
+                      {client.contacts && client.contacts.map((contact: any, idx: number) => (
+                        <div key={idx} style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '32px' }}>
+                          • {contact.name} {contact.email && `(${contact.email})`}
+                        </div>
+                      ))}
                     </div>
-                    {client.contacts && client.contacts.map((contact: any, idx: number) => (
-                      <div key={idx} style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: '32px' }}>
-                        • {contact.name} {contact.email && `(${contact.email})`}
+                  </td>
+                  <td style={{ color: 'var(--text-muted)' }}>{client.reference_name || '-'}</td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '1.25rem' }}>{country.flag}</span>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e293b' }}>
+                          {country.name}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <Clock size={11} color="#94a3b8" />
+                          <span>{country.timezone}</span>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                </td>
-                <td style={{ color: 'var(--text-muted)' }}>{client.reference_name || '-'}</td>
-                <td style={{ color: 'var(--text-muted)' }}>{client.email || '-'}</td>
-                <td style={{ textAlign: 'right' }}>
-                  <button className="btn btn-secondary" style={{ padding: '6px' }} onClick={() => handleOpenModal(client)}>
-                    <Edit2 size={14} />
-                  </button>
-                </td>
-              </tr>
-            ))}
+                    </div>
+                  </td>
+                  <td style={{ color: 'var(--text-muted)' }}>{client.email || '-'}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button className="btn btn-secondary" style={{ padding: '6px' }} onClick={() => handleOpenModal(client)}>
+                      <Edit2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
             {filteredClients.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
+                <td colSpan={6} style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
                   No se encontraron clientes.
                 </td>
               </tr>
@@ -187,6 +251,56 @@ export default function Clients() {
                   <label>Contacto Principal</label>
                   <input required type="text" className="form-input" value={newClient.name} onChange={e => setNewClient({...newClient, name: e.target.value})} />
                 </div>
+              </div>
+
+              {/* Selector de Ubicación / País para Huso Horario y Festivos */}
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', fontWeight: 700, color: '#334155' }}>
+                  <Globe size={15} color="var(--primary-color)" /> Ubicación del Cliente (Huso Horario & Calendario de Festivos) *
+                </label>
+                <select 
+                  className="form-input" 
+                  value={newClient.location_country} 
+                  onChange={e => setNewClient({ ...newClient, location_country: e.target.value })}
+                  style={{ fontWeight: 700, height: '42px', borderRadius: '10px', fontSize: '0.9rem' }}
+                >
+                  {COUNTRIES_CATALOG.map(c => (
+                    <option key={c.code} value={c.name}>
+                      {c.flag} {c.name} — {c.timezone}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Tarjeta de Resumen de Huso Horario y Calendario */}
+                {(() => {
+                  const selCountry = COUNTRIES_CATALOG.find(c => c.name === newClient.location_country) || COUNTRIES_CATALOG[0];
+                  return (
+                    <div style={{ 
+                      background: '#f8fafc', 
+                      padding: '12px 16px', 
+                      borderRadius: '10px', 
+                      border: '1px solid #e2e8f0', 
+                      marginTop: '8px', 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center', 
+                      fontSize: '0.8rem',
+                      flexWrap: 'wrap',
+                      gap: '8px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Clock size={14} color="#64748b" />
+                        <span style={{ color: '#64748b' }}>Huso Horario:</span>
+                        <strong style={{ color: '#0f172a' }}>{selCountry.timezone}</strong>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Calendar size={14} color="#047857" />
+                        <span style={{ color: '#64748b' }}>Calendario Festivos:</span>
+                        <span style={{ color: '#047857', fontWeight: 800 }}>📅 {selCountry.holidayRegion}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
               
               <div className="form-group">
