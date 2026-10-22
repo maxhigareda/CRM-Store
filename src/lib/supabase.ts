@@ -8,3 +8,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+const secondaryUrl = import.meta.env.VITE_SECONDARY_SUPABASE_URL || 'https://qsnwnukgwjuhifgricnx.supabase.co';
+const secondaryAnonKey = import.meta.env.VITE_SECONDARY_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzbndudWtnd2p1aGlmZ3JpY254Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA3NDM2NjYsImV4cCI6MjA4NjMxOTY2Nn0.Hyq6ZkkkYQSvpeA9A1gD3jJYxXzqpuVrTANbS18zg-4';
+
+export const supabaseSecondary = createClient(secondaryUrl, secondaryAnonKey);

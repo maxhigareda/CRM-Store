@@ -17,7 +17,10 @@ import {
   CalendarDays,
   Settings2,
   Briefcase,
-  Loader2
+  Loader2,
+  LayoutGrid,
+  List,
+  ArrowRight
 } from 'lucide-react';
 import GanttChart from '../../components/Gantt/GanttChart';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -56,6 +59,7 @@ export default function Projects() {
   const [showModal, setShowModal] = useState(false);
   const [showCommercialModal, setShowCommercialModal] = useState(false);
   const [showPhaseEditor, setShowPhaseEditor] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [editingId, setEditingId] = useState<string | null>(null);
   
   // Form State
@@ -417,106 +421,276 @@ export default function Projects() {
               <X size={16} />
             </button>
           )}
+
+          {/* Selector de Vistas: Tabla vs Tarjetas */}
+          <div style={{ display: 'flex', background: '#f1f5f9', padding: '3px', borderRadius: '10px', gap: '2px', marginLeft: '6px' }}>
+            <button
+              onClick={() => setViewMode('table')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                background: viewMode === 'table' ? 'white' : 'transparent',
+                color: viewMode === 'table' ? 'var(--primary-color)' : '#64748b',
+                boxShadow: viewMode === 'table' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
+              }}
+              title="Vista de Tabla"
+            >
+              <List size={15} /> Tabla
+            </button>
+            <button
+              onClick={() => setViewMode('cards')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '8px',
+                border: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                background: viewMode === 'cards' ? 'white' : 'transparent',
+                color: viewMode === 'cards' ? 'var(--primary-color)' : '#64748b',
+                boxShadow: viewMode === 'cards' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
+              }}
+              title="Vista de Tarjetas"
+            >
+              <LayoutGrid size={15} /> Tarjetas
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="table-container">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th style={{ textAlign: 'center' }}>Acciones</th>
-              <th>Cliente</th>
-              <th>Propuesta</th>
-              <th>Estado</th>
-              <th>Prioridad</th>
-              <th>Semanas</th>
-              <th>Kick off</th>
-              <th>Finalización</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
+      {viewMode === 'table' ? (
+        <div className="table-container">
+          <table className="table">
+            <thead>
               <tr>
-                <td colSpan={9} style={{ padding: '24px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
-                    <Loader2 className="animate-spin" size={18} />
-                    <span>Cargando proyectos...</span>
-                  </div>
-                </td>
+                <th>Nombre</th>
+                <th style={{ textAlign: 'center' }}>Acciones</th>
+                <th>Cliente</th>
+                <th>Propuesta</th>
+                <th>Estado</th>
+                <th>Prioridad</th>
+                <th>Semanas</th>
+                <th>Kick off</th>
+                <th>Finalización</th>
               </tr>
-            ) : error ? (
-              <tr>
-                <td colSpan={9} style={{ padding: '32px', textAlign: 'center' }}>
-                  <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '12px' }}>
-                    ⚠️ {error}
-                  </div>
-                  <button 
-                    className="btn btn-secondary" 
-                    onClick={() => fetchData()}
-                    style={{ margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
-                  >
-                    Reintentar
-                  </button>
-                </td>
-              </tr>
-            ) : filteredProjects.length === 0 ? (
-              <tr><td colSpan={9} style={{ textAlign: 'center' }}>No se encontraron proyectos.</td></tr>
-            ) : filteredProjects.map(p => {
-              const projectTags = allTags.filter(t => (p.tag_ids || []).includes(t.id));
-              const statusInfo = getStatusDisplay(p);
-              
-              return (
-                <tr key={p.id}>
-                  <td>
-                    <Link to={`/board/${p.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                      <div style={{ fontWeight: 600, color: '#6366f1' }}>{p.name}</div>
-                    </Link>
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
-                      {projectTags.map((tag) => (
-                        <span key={tag.id} className="status-chip" style={{ backgroundColor: `${tag.color}15`, color: tag.color, padding: '2px 8px', fontSize: '10px' }}>
-                          #{tag.name}
-                        </span>
-                      ))}
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={9} style={{ padding: '24px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
+                      <Loader2 className="animate-spin" size={18} />
+                      <span>Cargando proyectos...</span>
                     </div>
                   </td>
-                  <td style={{ textAlign: 'center' }}>
-                    <button className="btn btn-secondary" style={{ padding: '6px' }} onClick={() => handleOpenModal(p)} title="Editar Proyecto">
-                      <Edit2 size={14} />
+                </tr>
+              ) : error ? (
+                <tr>
+                  <td colSpan={9} style={{ padding: '32px', textAlign: 'center' }}>
+                    <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '12px' }}>
+                      ⚠️ {error}
+                    </div>
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={() => fetchData()}
+                      style={{ margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                    >
+                      Reintentar
                     </button>
                   </td>
-                  <td>{p.clients?.reference_name || p.clients?.name || 'Sin asignar'}</td>
-                  <td style={{ textAlign: 'center' }}>
-                    {p.proposal_url ? (
-                      <a href={p.proposal_url} target="_blank" rel="noopener noreferrer" title="Ver Propuesta" style={{ color: 'var(--primary-color)' }}>
-                        <FileText size={18} />
-                      </a>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>-</span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={`status-chip ${statusInfo.class}`}>
-                      {statusInfo.label}
-                    </span>
-                  </td>
-                  <td>
-                    <span className="status-chip" style={{ 
-                      backgroundColor: p.priority === 'urgent' ? '#fee2e2' : p.priority === 'high' ? '#ffedd5' : p.priority === 'low' ? '#dcfce7' : '#f1f5f9',
-                      color: p.priority === 'urgent' ? '#991b1b' : p.priority === 'high' ? '#c2410c' : p.priority === 'low' ? '#166534' : '#475569'
-                    }}>
-                      {p.priority === 'urgent' ? '🔴 Urgente' : p.priority === 'high' ? '🟠 Alta' : p.priority === 'low' ? '🟢 Baja' : '🟡 Media'}
-                    </span>
-                  </td>
-                  <td style={{ textAlign: 'center' }}>{p.duration_weeks}</td>
-                  <td>{p.delivery_date ? new Date(p.delivery_date + 'T12:00:00').toLocaleDateString() : '-'}</td>
-                  <td style={{ fontWeight: 500 }}>{p.end_date ? new Date(p.end_date + 'T12:00:00').toLocaleDateString() : '-'}</td>
                 </tr>
+              ) : filteredProjects.length === 0 ? (
+                <tr><td colSpan={9} style={{ textAlign: 'center' }}>No se encontraron proyectos.</td></tr>
+              ) : filteredProjects.map(p => {
+                const projectTags = allTags.filter(t => (p.tag_ids || []).includes(t.id));
+                const statusInfo = getStatusDisplay(p);
+                
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <Link to={`/board/${p.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                        <div style={{ fontWeight: 600, color: '#6366f1' }}>{p.name}</div>
+                      </Link>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                        {projectTags.map((tag) => (
+                          <span key={tag.id} className="status-chip" style={{ backgroundColor: `${tag.color}15`, color: tag.color, padding: '2px 8px', fontSize: '10px' }}>
+                            #{tag.name}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <button className="btn btn-secondary" style={{ padding: '6px' }} onClick={() => handleOpenModal(p)} title="Editar Proyecto">
+                        <Edit2 size={14} />
+                      </button>
+                    </td>
+                    <td>{p.clients?.reference_name || p.clients?.name || 'Sin asignar'}</td>
+                    <td style={{ textAlign: 'center' }}>
+                      {p.proposal_url ? (
+                        <a href={p.proposal_url} target="_blank" rel="noopener noreferrer" title="Ver Propuesta" style={{ color: 'var(--primary-color)' }}>
+                          <FileText size={18} />
+                        </a>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>-</span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`status-chip ${statusInfo.class}`}>
+                        {statusInfo.label}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="status-chip" style={{ 
+                        backgroundColor: p.priority === 'urgent' ? '#fee2e2' : p.priority === 'high' ? '#ffedd5' : p.priority === 'low' ? '#dcfce7' : '#f1f5f9',
+                        color: p.priority === 'urgent' ? '#991b1b' : p.priority === 'high' ? '#c2410c' : p.priority === 'low' ? '#166534' : '#475569'
+                      }}>
+                        {p.priority === 'urgent' ? '🔴 Urgente' : p.priority === 'high' ? '🟠 Alta' : p.priority === 'low' ? '🟢 Baja' : '🟡 Media'}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>{p.duration_weeks}</td>
+                    <td>{p.delivery_date ? new Date(p.delivery_date + 'T12:00:00').toLocaleDateString() : '-'}</td>
+                    <td style={{ fontWeight: 500 }}>{p.end_date ? new Date(p.end_date + 'T12:00:00').toLocaleDateString() : '-'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        /* Vista de Tarjetas / Grid */
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+          {loading ? (
+            <div style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+              <Loader2 className="animate-spin" size={24} style={{ margin: '0 auto 12px' }} />
+              Cargando tarjetas de proyectos...
+            </div>
+          ) : filteredProjects.length === 0 ? (
+            <div style={{ gridColumn: '1 / -1', background: 'white', padding: '40px', borderRadius: '16px', border: '1px solid #e2e8f0', textAlign: 'center', color: '#64748b' }}>
+              No se encontraron proyectos activos.
+            </div>
+          ) : (
+            filteredProjects.map(p => {
+              const projectTags = allTags.filter(t => (p.tag_ids || []).includes(t.id));
+              const statusInfo = getStatusDisplay(p);
+
+              return (
+                <div 
+                  key={p.id}
+                  style={{
+                    background: 'white',
+                    borderRadius: '16px',
+                    border: '1px solid #e2e8f0',
+                    padding: '20px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    boxShadow: '0 2px 6px rgba(0,0,0,0.03)',
+                    transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+                  }}
+                >
+                  <div>
+                    {/* Header de la Tarjeta: Cliente + Botón Editar */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        {p.clients?.reference_name || p.clients?.name || 'Sin asignar'}
+                      </span>
+                      <button 
+                        className="btn btn-secondary" 
+                        style={{ padding: '4px 8px', borderRadius: '6px' }} 
+                        onClick={() => handleOpenModal(p)} 
+                        title="Editar Proyecto"
+                      >
+                        <Edit2 size={13} />
+                      </button>
+                    </div>
+
+                    {/* Nombre del Proyecto */}
+                    <Link to={`/board/${p.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', margin: '0 0 10px 0', lineHeight: 1.3 }}>
+                        {p.name}
+                      </h3>
+                    </Link>
+
+                    {/* Tags */}
+                    {projectTags.length > 0 && (
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
+                        {projectTags.map(tag => (
+                          <span key={tag.id} style={{ backgroundColor: `${tag.color}15`, color: tag.color, padding: '2px 8px', fontSize: '10px', fontWeight: 700, borderRadius: '6px' }}>
+                            #{tag.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Badges de Estado y Prioridad */}
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '16px' }}>
+                      <span className={`status-chip ${statusInfo.class}`} style={{ margin: 0 }}>
+                        {statusInfo.label}
+                      </span>
+                      <span className="status-chip" style={{ 
+                        margin: 0,
+                        backgroundColor: p.priority === 'urgent' ? '#fee2e2' : p.priority === 'high' ? '#ffedd5' : p.priority === 'low' ? '#dcfce7' : '#f1f5f9',
+                        color: p.priority === 'urgent' ? '#991b1b' : p.priority === 'high' ? '#c2410c' : p.priority === 'low' ? '#166534' : '#475569'
+                      }}>
+                        {p.priority === 'urgent' ? '🔴 Urgente' : p.priority === 'high' ? '🟠 Alta' : p.priority === 'low' ? '🟢 Baja' : '🟡 Media'}
+                      </span>
+                    </div>
+
+                    {/* Datos de Fechas y Semanas */}
+                    <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '10px', fontSize: '0.8rem', color: '#475569', display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#64748b' }}>Duración:</span>
+                        <strong>{p.duration_weeks} semanas</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#64748b' }}>Kick Off:</span>
+                        <span>{p.delivery_date ? new Date(p.delivery_date + 'T12:00:00').toLocaleDateString() : '-'}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#64748b' }}>Finalización:</span>
+                        <strong style={{ color: '#0f172a' }}>{p.end_date ? new Date(p.end_date + 'T12:00:00').toLocaleDateString() : '-'}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Acciones de la Tarjeta */}
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center', borderTop: '1px solid #f1f5f9', paddingTop: '14px' }}>
+                    <Link 
+                      to={`/board/${p.id}`} 
+                      className="btn btn-primary" 
+                      style={{ flex: 1, padding: '8px 12px', fontSize: '0.8rem', fontWeight: 700, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', textDecoration: 'none' }}
+                    >
+                      Abrir Tablero <ArrowRight size={14} />
+                    </Link>
+                    {p.proposal_url && (
+                      <a 
+                        href={p.proposal_url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="btn btn-secondary" 
+                        style={{ padding: '8px 12px', borderRadius: '8px' }}
+                        title="Ver Propuesta"
+                      >
+                        <FileText size={15} />
+                      </a>
+                    )}
+                  </div>
+                </div>
               );
-            })}
-          </tbody>
-        </table>
-      </div>
+            })
+          )}
+        </div>
+      )}
 
       {/* Main Project Modal */}
       {showModal && (

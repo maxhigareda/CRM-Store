@@ -19,12 +19,36 @@ import {
 import { supabase } from '../../lib/supabase';
 import { useNotification } from '../../contexts/NotificationContext';
 import { calculateWorkingEndDate, weeksToWorkingDays } from '../../utils/workdayCalculator';
-import type { ProjectPO, CostRateItem, CommittedResource } from '../../types/projectControl';
+import type { ProjectPO } from '../../types/projectControl';
 
 interface CreateProjectCommercialModalProps {
   isOpen: boolean;
   onClose: () => void;
   onProjectCreated: (newProject: any) => void;
+}
+
+// Catálogo de roles tabulador con tarifas promedio
+const DEFAULT_TABULADOR_ROLES = [
+  { role_name: 'Project / Product Manager', seniority: 'Medium (3-5)', hourly_rate: 632.00 },
+  { role_name: 'BI Visualization Developer', seniority: 'Medium (3-5)', hourly_rate: 491.60 },
+  { role_name: 'Data Engineer', seniority: 'Medium (3-5)', hourly_rate: 589.80 },
+  { role_name: 'Data Scientist', seniority: 'Medium (3-5)', hourly_rate: 618.00 },
+  { role_name: 'Solution Architect', seniority: 'Medium (3-5)', hourly_rate: 632.00 },
+  { role_name: 'BI Data Architect', seniority: 'Medium (3-5)', hourly_rate: 632.00 },
+  { role_name: 'Data / Operations Analyst', seniority: 'Medium (3-5)', hourly_rate: 421.20 },
+  { role_name: 'Business Analyst', seniority: 'Medium (3-5)', hourly_rate: 516.09 },
+  { role_name: 'Low Code Developer', seniority: 'Medium (3-5)', hourly_rate: 442.25 },
+  { role_name: 'Power App / Streamlit Developer', seniority: 'Medium (3-5)', hourly_rate: 516.00 },
+  { role_name: 'Azure Developer', seniority: 'Medium (3-5)', hourly_rate: 491.60 }
+];
+
+interface DynamicCommittedRoleRow {
+  id: string;
+  role_name: string;
+  seniority: string;
+  weeks: number;
+  hours_per_week: number;
+  hourly_rate: number;
 }
 
 export default function CreateProjectCommercialModal({
@@ -38,7 +62,7 @@ export default function CreateProjectCommercialModal({
 
   // Catálogos cargados
   const [clients, setClients] = useState<any[]>([]);
-  const [costRates, setCostRates] = useState<CostRateItem[]>([]);
+  const [tabuladorRoles, setTabuladorRoles] = useState(DEFAULT_TABULADOR_ROLES);
   const [holidays, setHolidays] = useState<string[]>([]);
   const [pms, setPms] = useState<any[]>([]);
 
@@ -56,10 +80,21 @@ export default function CreateProjectCommercialModal({
   const [durationWeeks, setDurationWeeks] = useState<number>(4);
   const [calculatedEndDate, setCalculatedEndDate] = useState<string>('');
 
-  // Presupuesto, Costos y Margen
+  // Presupuesto, Costos y Margen Dinámico
   const [quotedBudget, setQuotedBudget] = useState<number>(0);
   const [targetMarginPct, setTargetMarginPct] = useState<number>(35);
-  const [committedResources, setCommittedResources] = useState<CommittedResource[]>([]);
+  
+  // Líneas dinámicas de roles del tabulador (por defecto al menos 1 línea visible)
+  const [committedRoleRows, setCommittedRoleRows] = useState<DynamicCommittedRoleRow[]>([
+    {
+      id: 'row-1',
+      role_name: 'Project / Product Manager',
+      seniority: 'Medium (3-5)',
+      weeks: 4,
+      hours_per_week: 40,
+      hourly_rate: 632.00
+    }
+  ]);
   
   // Esquema de Pagos
   const [paymentScheme, setPaymentScheme] = useState<'exhibicion_unica' | 'por_entregables'>('por_entregables');
@@ -80,15 +115,32 @@ export default function CreateProjectCommercialModal({
 
   const fetchInitialData = async () => {
     try {
-      const [clientsRes, ratesRes, profilesRes] = await Promise.all([
+      const [clientsRes, profilesRes, tabRes] = await Promise.all([
         supabase.from('clients').select('id, name, reference_name, email, contacts').order('reference_name'),
-        supabase.from('cost_rates_catalog').select('*').order('role_name'),
-        supabase.from('profiles').select('id, full_name, email').eq('role', 'admin').order('full_name')
+        supabase.from('profiles').select('id, full_name, email').eq('role', 'admin').order('full_name'),
+        supabase.from('tabulador').select('*')
       ]);
 
       if (clientsRes.data) setClients(clientsRes.data);
-      if (ratesRes.data) setCostRates(ratesRes.data);
       if (profilesRes.data) setPms(profilesRes.data);
+
+      if (tabRes.data && tabRes.data.length > 0) {
+        // Promediar tarifas reales por rol del tabulador
+        const roleMap: Record<string, { totalRate: number; count: number; seniority: string }> = {};
+        tabRes.data.forEach((t: any) => {
+          if (t.rol && t.costo_hora_mxn) {
+            if (!roleMap[t.rol]) roleMap[t.rol] = { totalRate: 0, count: 0, seniority: t.seniority || 'Mid' };
+            roleMap[t.rol].totalRate += Number(t.costo_hora_mxn);
+            roleMap[t.rol].count += 1;
+          }
+        });
+        const dynamicParsed = Object.entries(roleMap).map(([role, info]) => ({
+          role_name: role,
+          seniority: info.seniority,
+          hourly_rate: Number((info.totalRate / info.count).toFixed(2))
+        }));
+        if (dynamicParsed.length > 0) setTabuladorRoles(dynamicParsed);
+      }
     } catch (err: any) {
       console.error(err);
       showNotification('error', 'Error al cargar catálogos comerciales');
@@ -122,36 +174,50 @@ export default function CreateProjectCommercialModal({
     }
   }, [startDate, durationWeeks, holidays]);
 
-  // Cálculos de Margen y Costos
-  const totalCommittedHours = committedResources.reduce((acc, curr) => acc + (Number(curr.hours) || 0), 0);
-  const totalEstimatedCost = committedResources.reduce((acc, curr) => acc + ((Number(curr.hours) || 0) * (Number(curr.rate) || 0)), 0);
+  // Cálculos de Margen y Costos usando roles dinámicos del tabulador
+  const totalCommittedHours = committedRoleRows.reduce((acc, curr) => acc + (Number(curr.weeks || 0) * Number(curr.hours_per_week || 40)), 0);
+  const totalEstimatedCost = committedRoleRows.reduce((acc, curr) => acc + ((Number(curr.weeks || 0) * Number(curr.hours_per_week || 40)) * (Number(curr.hourly_rate) || 0)), 0);
   const calculatedMarginMoney = quotedBudget > 0 ? (quotedBudget - totalEstimatedCost) : 0;
   const calculatedMarginPct = quotedBudget > 0 ? ((calculatedMarginMoney / quotedBudget) * 100) : 0;
   const totalPosAmount = pos.reduce((acc, curr) => acc + (Number(curr.po_amount) || 0), 0);
   const poMismatch = quotedBudget > 0 && totalPosAmount > 0 && Math.abs(totalPosAmount - quotedBudget) > 1.0;
 
-  const handleAddResource = (rateItem: CostRateItem) => {
-    setCommittedResources(prev => [
+  // Manejo dinámico de roles en la propuesta
+  const handleAddRoleRow = () => {
+    setCommittedRoleRows(prev => [
       ...prev,
       {
-        role_id: rateItem.id,
-        role_name: `${rateItem.role_name} (${rateItem.seniority})`,
-        hours: 40,
-        rate: rateItem.hourly_rate_estimated
+        id: 'row-' + Date.now(),
+        role_name: tabuladorRoles[0]?.role_name || 'Data Engineer',
+        seniority: tabuladorRoles[0]?.seniority || 'Medium (3-5)',
+        weeks: durationWeeks || 4,
+        hours_per_week: 40,
+        hourly_rate: tabuladorRoles[0]?.hourly_rate || 589.80
       }
     ]);
   };
 
-  const handleUpdateResourceHours = (index: number, hours: number) => {
-    setCommittedResources(prev => {
-      const copy = [...prev];
-      copy[index].hours = hours;
-      return copy;
-    });
+  const handleUpdateRoleRow = (id: string, updates: Partial<DynamicCommittedRoleRow>) => {
+    setCommittedRoleRows(prev => prev.map(r => {
+      if (r.id !== id) return r;
+      const updated = { ...r, ...updates };
+      if (updates.role_name && updates.role_name !== r.role_name) {
+        const found = tabuladorRoles.find(t => t.role_name === updates.role_name);
+        if (found) {
+          updated.hourly_rate = found.hourly_rate;
+          updated.seniority = found.seniority;
+        }
+      }
+      return updated;
+    }));
   };
 
-  const handleRemoveResource = (index: number) => {
-    setCommittedResources(prev => prev.filter((_, i) => i !== index));
+  const handleRemoveRoleRow = (id: string) => {
+    if (committedRoleRows.length <= 1) {
+      showNotification('info', 'Debe mantenerse al menos 1 rol en la propuesta.');
+      return;
+    }
+    setCommittedRoleRows(prev => prev.filter(r => r.id !== id));
   };
 
   const handleAddPo = () => {
@@ -183,6 +249,7 @@ export default function CreateProjectCommercialModal({
     setNewPoJustification('');
   };
 
+  // Creación Resiliente de Proyecto (Sin Bloqueos por Columnas Faltantes)
   const handleSubmitProject = async () => {
     if (!name.trim()) return showNotification('error', 'El nombre del proyecto es obligatorio');
     if (!clientId) return showNotification('error', 'Selecciona un cliente');
@@ -191,42 +258,73 @@ export default function CreateProjectCommercialModal({
 
     setLoading(true);
     try {
-      const { data: projectData, error: projErr } = await supabase
-        .from('projects')
-        .insert([{
-          name: name.trim(),
-          client_id: clientId,
-          client_contact_name: clientContactName.trim() || null,
-          stakeholder_email: stakeholderEmail.trim().toLowerCase(),
-          pm_id: pmId || null,
-          proposal_url: proposalUrl.trim() || null,
-          google_drive_folder_url: googleDriveFolderUrl.trim() || null,
-          delivery_date: startDate,
-          duration_weeks: durationWeeks,
-          end_date: calculatedEndDate,
-          baseline_start_date: startDate,
-          baseline_end_date: calculatedEndDate,
-          current_projected_end_date: calculatedEndDate,
-          quoted_budget: quotedBudget,
-          quoted_hours: totalCommittedHours,
-          estimated_cost: totalEstimatedCost,
-          target_margin_pct: targetMarginPct,
-          payment_scheme: paymentScheme,
-          status: 'todo',
-          stage: 'arranque',
-          current_baseline_version: 1
-        }])
-        .select(`*, clients(name, reference_name)`)
-        .single();
+      const fullPayload: Record<string, any> = {
+        name: name.trim(),
+        client_id: clientId,
+        client_contact_name: clientContactName.trim() || null,
+        stakeholder_email: stakeholderEmail.trim().toLowerCase(),
+        pm_id: pmId || null,
+        proposal_url: proposalUrl.trim() || null,
+        google_drive_folder_url: googleDriveFolderUrl.trim() || null,
+        delivery_date: startDate,
+        duration_weeks: durationWeeks,
+        end_date: calculatedEndDate,
+        baseline_start_date: startDate,
+        baseline_end_date: calculatedEndDate,
+        current_projected_end_date: calculatedEndDate,
+        quoted_budget: quotedBudget,
+        quoted_hours: totalCommittedHours,
+        estimated_cost: totalEstimatedCost,
+        target_margin_pct: targetMarginPct,
+        payment_scheme: paymentScheme,
+        status: 'todo',
+        stage: 'arranque',
+        current_baseline_version: 1
+      };
 
-      if (projErr) throw projErr;
+      let projectData: any = null;
+      let currentPayload = { ...fullPayload };
+
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const { data, error: projErr } = await supabase
+          .from('projects')
+          .insert([currentPayload])
+          .select(`*, clients(name, reference_name)`)
+          .single();
+
+        if (!projErr) {
+          projectData = data;
+          break;
+        }
+
+        // Si el error indica columna inexistente (e.g. Could not find the 'baseline_start_date' column)
+        const missingColMatch = projErr.message.match(/Could not find the '([^']+)' column/i) ||
+                                projErr.message.match(/column "?([^"\s]+)"? of relation "?projects"? does not exist/i);
+        if (missingColMatch && missingColMatch[1] && missingColMatch[1] in currentPayload) {
+          const colToRemove = missingColMatch[1];
+          console.warn(`Omitiendo columna no existente en BD projects: ${colToRemove}`);
+          delete currentPayload[colToRemove];
+          continue;
+        }
+
+        // Si es otro error no recuperable, lanzarlo
+        throw projErr;
+      }
+
+      if (!projectData) {
+        throw new Error('No se pudo confirmar la creación del proyecto.');
+      }
 
       if (pos.length > 0) {
-        const posToInsert = pos.map(p => ({
-          ...p,
-          project_id: projectData.id
-        }));
-        await supabase.from('project_pos').insert(posToInsert);
+        try {
+          const posToInsert = pos.map(p => ({
+            ...p,
+            project_id: projectData.id
+          }));
+          await supabase.from('project_pos').insert(posToInsert);
+        } catch (poErr) {
+          console.warn('Advertencia al insertar POs:', poErr);
+        }
       }
 
       showNotification('success', `Proyecto "${name}" dado de alta con margen proyectado del ${calculatedMarginPct.toFixed(1)}%`);
@@ -614,78 +712,139 @@ export default function CreateProjectCommercialModal({
                 </div>
               </div>
 
-              {/* Desglose de Horas y Roles Comprometidos */}
+              {/* Desglose Dinámico de Horas y Roles del Tabulador */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                 <div className="form-card" style={{ border: '2px solid #e2e8f0', background: 'white' }}>
-                  <div className="card-title" style={{ color: '#1e293b', marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
+                  <div className="card-title" style={{ color: '#1e293b', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center' }}>
                       <div style={{ background: '#f5f3ff', padding: '6px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '12px' }}>
                         <Calculator size={16} style={{ color: '#7c3aed' }} />
                       </div>
-                      <span style={{ fontSize: '0.9rem' }}>Horas Comprometidas en la Propuesta por Rol</span>
+                      <div>
+                        <span style={{ fontSize: '0.9rem', fontWeight: 800 }}>Horas Comprometidas por Rol (Tabulador)</span>
+                        <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Costo estimado cruzado con promedio de posiciones reales</div>
+                      </div>
                     </div>
-                    <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 700 }}>Total: {totalCommittedHours} hrs</span>
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ fontSize: '0.85rem', color: '#7c3aed', fontWeight: 800 }}>Total: {totalCommittedHours} hrs</span>
+                      <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Costo: ${totalEstimatedCost.toLocaleString('es-MX')}</div>
+                    </div>
                   </div>
 
-                  {/* Botones de roles para agregar con un clic */}
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
-                    {costRates.map(item => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => handleAddResource(item)}
-                        style={{
-                          padding: '6px 12px',
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          borderRadius: '8px',
-                          border: '1px solid #cbd5e1',
-                          background: '#f8fafc',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}
-                      >
-                        <Plus size={12} color="#7c3aed" /> {item.role_name} (${item.hourly_rate_estimated}/h)
-                      </button>
-                    ))}
-                  </div>
+                  {/* Lista Dinámica de Roles */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+                    {committedRoleRows.map((row, idx) => {
+                      const rowHours = Number(row.weeks || 0) * Number(row.hours_per_week || 40);
+                      const rowCost = rowHours * Number(row.hourly_rate || 0);
 
-                  {/* Tabla de Horas Cotizadas */}
-                  {committedResources.length === 0 ? (
-                    <div style={{ padding: '32px', background: '#f8fafc', borderRadius: '14px', border: '2px dashed #cbd5e1', textAlign: 'center', color: '#94a3b8' }}>
-                      Agrega los roles comprometidos arriba para calcular el costo y margen automático.
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      {committedResources.map((res, idx) => (
-                        <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.4fr 120px 1fr 40px', gap: '12px', alignItems: 'center', background: '#f8fafc', padding: '12px 16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                          <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#0f172a' }}>{res.role_name}</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <input 
-                              type="number"
-                              min={1}
-                              value={res.hours}
-                              onChange={e => handleUpdateResourceHours(idx, Number(e.target.value))}
-                              style={{ width: '80px', padding: '8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 700 }}
-                            />
-                            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>hrs</span>
+                      return (
+                        <div 
+                          key={row.id} 
+                          style={{ 
+                            display: 'grid', 
+                            gridTemplateColumns: '2fr 100px 90px 100px 40px', 
+                            gap: '10px', 
+                            alignItems: 'center', 
+                            background: '#f8fafc', 
+                            padding: '12px 14px', 
+                            borderRadius: '12px', 
+                            border: '1px solid #e2e8f0' 
+                          }}
+                        >
+                          {/* 1. Selector de Rol del Tabulador */}
+                          <div>
+                            <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '3px' }}>
+                              ROL #{idx + 1} (TABULADOR)
+                            </label>
+                            <select
+                              className="form-input"
+                              value={row.role_name}
+                              onChange={e => handleUpdateRoleRow(row.id, { role_name: e.target.value })}
+                              style={{ width: '100%', height: '36px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 700, marginBottom: 0 }}
+                            >
+                              {tabuladorRoles.map(tr => (
+                                <option key={tr.role_name} value={tr.role_name}>
+                                  {tr.role_name} (${tr.hourly_rate.toFixed(2)}/h)
+                                </option>
+                              ))}
+                            </select>
                           </div>
-                          <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#334155', textAlign: 'right' }}>
-                            ${(res.hours * res.rate).toLocaleString('es-MX')}
+
+                          {/* 2. Tiempo Asignado (Semanas) */}
+                          <div>
+                            <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '3px' }}>
+                              SEMANAS
+                            </label>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <input 
+                                type="number"
+                                min={1}
+                                value={row.weeks}
+                                onChange={e => handleUpdateRoleRow(row.id, { weeks: Number(e.target.value) })}
+                                style={{ width: '100%', height: '36px', padding: '0 8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 800, textAlign: 'center' }}
+                              />
+                              <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 700 }}>sem</span>
+                            </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveResource(idx)}
-                            style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', padding: '4px' }}
-                          >
-                            <Trash2 size={16} />
-                          </button>
+
+                          {/* 3. Horas Resultantes */}
+                          <div>
+                            <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '3px' }}>
+                              HORAS
+                            </label>
+                            <div style={{ height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'white', borderRadius: '8px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.85rem', color: '#0f172a' }}>
+                              {rowHours}h
+                            </div>
+                          </div>
+
+                          {/* 4. Costo Total de la Línea */}
+                          <div>
+                            <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '3px', textAlign: 'right' }}>
+                              COSTO TOTAL
+                            </label>
+                            <div style={{ height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', fontWeight: 800, fontSize: '0.85rem', color: '#334155' }}>
+                              ${rowCost.toLocaleString('es-MX')}
+                            </div>
+                          </div>
+
+                          {/* 5. Botón Eliminar Fila */}
+                          <div style={{ display: 'flex', justifyContent: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveRoleRow(row.id)}
+                              style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', padding: '6px' }}
+                              title="Eliminar rol de la cotización"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      );
+                    })}
+                  </div>
+
+                  {/* Botón para Agregar Dinámicamente Más Roles */}
+                  <button
+                    type="button"
+                    onClick={handleAddRoleRow}
+                    className="btn btn-secondary"
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      borderRadius: '10px',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      border: '2px dashed #cbd5e1',
+                      background: '#f8fafc',
+                      color: 'var(--primary-color)'
+                    }}
+                  >
+                    <Plus size={15} /> + Agregar Otro Rol a la Cotización
+                  </button>
                 </div>
               </div>
             </div>

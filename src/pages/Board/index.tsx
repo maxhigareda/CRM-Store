@@ -58,6 +58,10 @@ import MilestonesInvoicingManager from '../../components/ProjectControl/Mileston
 import SustainHandoffManager from '../../components/ProjectControl/SustainHandoffManager';
 import ChangeRequestsManager from '../../components/ProjectControl/ChangeRequestsManager';
 import ProjectDocumentsView from '../../components/ProjectControl/ProjectDocumentsView';
+import ProjectDirectoryManager from '../../components/ProjectControl/ProjectDirectoryManager';
+import type { DirectoryMember } from '../../components/ProjectControl/ProjectDirectoryManager';
+import ProjectAgreementsManager from '../../components/ProjectControl/ProjectAgreementsManager';
+import ProjectTasksTableView from '../../components/ProjectControl/ProjectTasksTableView';
 import { getCollaboratorWeeklyCapacity } from '../../utils/timeTrackingService';
 import type { ProjectRisk } from '../../components/ProjectControl/RisksManager';
 import type { Deliverable, ProjectPO } from '../../types/projectControl';
@@ -127,7 +131,8 @@ export default function Board() {
   const [globalInternalProjects, setGlobalInternalProjects] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'kanban' | 'table' | 'gantt' | 'deliverables' | 'risks' | 'timesheet' | 'capacity' | 'invoicing' | 'changes' | 'sustain' | 'documents'>('kanban');
+  const [viewMode, setViewMode] = useState<'kanban' | 'table' | 'gantt' | 'directory' | 'deliverables' | 'agreements' | 'risks' | 'timesheet' | 'capacity' | 'invoicing' | 'changes' | 'sustain' | 'documents'>('kanban');
+  const [directoryMembers, setDirectoryMembers] = useState<DirectoryMember[]>([]);
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
   const [risks, setRisks] = useState<ProjectRisk[]>([]);
   const [pos, setPos] = useState<ProjectPO[]>([]);
@@ -165,14 +170,15 @@ export default function Board() {
         supabase.from('tasks').select('internal_project_name').not('internal_project_name', 'is', null),
         supabase.from('project_deliverables').select('*').eq('project_id', projectId).order('created_at'),
         supabase.from('project_risks').select('*, responsible:profiles(id, full_name, email), deliverable:project_deliverables(id, name)').eq('project_id', projectId).order('created_at', { ascending: false }),
-        supabase.from('project_pos').select('*').eq('project_id', projectId).order('created_at')
+        supabase.from('project_pos').select('*').eq('project_id', projectId).order('created_at'),
+        supabase.from('project_directory_members').select('*').eq('project_id', projectId).order('created_at')
       ]);
 
       const timeoutPromise = new Promise<any>((_, reject) => 
         setTimeout(() => reject(new Error("Timeout al cargar datos del tablero")), 30000)
       );
 
-      const [projRes, tasksRes, profilesRes, tagsRes, internalProjRes, delivRes, risksRes, posRes] = await Promise.race([fetchPromise, timeoutPromise]);
+      const [projRes, tasksRes, profilesRes, tagsRes, internalProjRes, delivRes, risksRes, posRes, dirRes] = await Promise.race([fetchPromise, timeoutPromise]);
 
       if (projRes.data) setProject(projRes.data);
       if (tasksRes.data) {
@@ -193,6 +199,7 @@ export default function Board() {
       if (delivRes?.data) setDeliverables(delivRes.data || []);
       if (risksRes?.data) setRisks(risksRes.data || []);
       if (posRes?.data) setPos(posRes.data || []);
+      if (dirRes?.data) setDirectoryMembers(dirRes.data || []);
       if (internalProjRes.data) {
         const uniqueProjects = Array.from(new Set(internalProjRes.data.map((t: any) => t.internal_project_name).filter(Boolean)));
         setGlobalInternalProjects(uniqueProjects as string[]);
@@ -287,14 +294,6 @@ export default function Board() {
   const handleEditTask = (task: Task) => {
     setEditingTask(task);
     setShowTaskModal(true);
-  };
-
-  const calculateDaysRemaining = (endDateStr: string | null) => {
-    if (!endDateStr) return null;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const end = new Date(endDateStr + 'T12:00:00');
-    return Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   };
 
   if (loading) return <div style={{ padding: '100px', textAlign: 'center', background: '#f8fafc' }}><div className="loading-spinner"></div> Cargando tablero...</div>;
@@ -513,6 +512,25 @@ export default function Board() {
           {/* Bloque 2: Pestañas de Gestión y Control Interno */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <button 
+              onClick={() => setViewMode('directory')}
+              style={{ 
+                padding: '7px 12px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'directory' ? '#e0e7ff' : 'transparent', 
+                color: viewMode === 'directory' ? '#4338ca' : '#64748b', 
+                cursor: 'pointer' 
+              }}
+            >
+              👥 Directorio ({directoryMembers.length})
+            </button>
+
+            <button 
               onClick={() => setViewMode('deliverables')}
               style={{ 
                 padding: '7px 12px', 
@@ -529,6 +547,25 @@ export default function Board() {
               }}
             >
               📦 Entregables ({deliverables.length})
+            </button>
+
+            <button 
+              onClick={() => setViewMode('agreements')}
+              style={{ 
+                padding: '7px 12px', 
+                borderRadius: '8px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '6px', 
+                fontSize: '0.8rem', 
+                fontWeight: 700, 
+                border: 'none', 
+                background: viewMode === 'agreements' ? '#fef3c7' : 'transparent', 
+                color: viewMode === 'agreements' ? '#b45309' : '#64748b', 
+                cursor: 'pointer' 
+              }}
+            >
+              📌 Acuerdos y Pendientes
             </button>
             
             <button 
@@ -695,11 +732,41 @@ export default function Board() {
         )}
 
         {viewMode === 'table' && (
-          <TableView 
-            tasks={displayedTasks} 
-            onEditTask={handleEditTask} 
-            calculateDays={calculateDaysRemaining} 
-          />
+          <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+            <ProjectTasksTableView
+              projectId={projectId!}
+              tasks={displayedTasks as any}
+              deliverables={deliverables}
+              directoryMembers={directoryMembers}
+              committedRoles={
+                (project as any)?.committed_roles_breakdown?.map((r: any) => r.role_name) ||
+                ['Project / Product Manager', 'Data Engineer', 'BI Visualization Developer', 'Analista']
+              }
+              onTasksUpdated={fetchBoardData}
+            />
+          </div>
+        )}
+
+        {viewMode === 'directory' && (
+          <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+            <ProjectDirectoryManager
+              projectId={projectId!}
+              projectName={project?.name}
+              onDirectoryUpdated={fetchBoardData}
+            />
+          </div>
+        )}
+
+        {viewMode === 'agreements' && (
+          <div style={{ height: '100%', overflowY: 'auto', paddingRight: '8px' }}>
+            <ProjectAgreementsManager
+              projectId={projectId!}
+              deliverables={deliverables}
+              tasks={tasks}
+              directoryMembers={directoryMembers}
+              onDataUpdated={fetchBoardData}
+            />
+          </div>
         )}
 
         {viewMode === 'gantt' && (
@@ -1063,64 +1130,6 @@ function TaskCard({ task, allTags, onClick, onOpenTimeLog, isOverlay, risks = []
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function TableView({ tasks, onEditTask, calculateDays }: any) {
-  return (
-    <div style={{ background: 'white', borderRadius: '20px', border: '1px solid #e2e8f0', overflow: 'hidden', height: '100%', overflowY: 'auto' }}>
-      <table className="table">
-        <thead>
-          <tr style={{ background: '#f8fafc' }}>
-            <th style={{ padding: '16px 24px' }}>TAREA</th>
-            <th>INICIO</th>
-            <th>DEADLINE</th>
-            <th>TIEMPO RESTANTE</th>
-            <th style={{ textAlign: 'center' }}>% CHECKLIST</th>
-            <th>ESTADO</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tasks.map((task: any) => {
-            const daysLeft = calculateDays(task.due_date);
-            const progress = task.checklists?.total > 0 ? Math.round((task.checklists.completed / task.checklists.total) * 100) : (task.status === 'done' ? 100 : 0);
-            
-            return (
-              <tr key={task.id} onClick={() => onEditTask(task)} style={{ cursor: 'pointer' }}>
-                <td style={{ padding: '16px 24px', fontWeight: 700, color: '#1e293b' }}>{task.title}</td>
-                <td style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>
-                   {task.start_date ? new Date(task.start_date + 'T12:00:00').toLocaleDateString('es-ES') : '-'}
-                </td>
-                <td style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>
-                   {task.due_date ? new Date(task.due_date + 'T12:00:00').toLocaleDateString('es-ES') : '-'}
-                </td>
-                <td>
-                  {daysLeft !== null ? (
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '8px', background: daysLeft < 0 ? '#fef2f2' : daysLeft < 10 ? '#fff7ed' : '#f0fdf4', color: daysLeft < 0 ? '#ef4444' : daysLeft < 10 ? '#f97316' : '#16a34a', fontSize: '0.75rem', fontWeight: 800 }}>
-                      <Timer size={14} />
-                      {daysLeft < 0 ? `Retrasado (${Math.abs(daysLeft)}d)` : `${daysLeft} días`}
-                    </div>
-                  ) : '-'}
-                </td>
-                <td style={{ textAlign: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '120px', margin: '0 auto' }}>
-                    <div style={{ flex: 1, height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div style={{ width: `${progress}%`, height: '100%', background: 'var(--primary-color)' }}></div>
-                    </div>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#475569' }}>{progress}%</span>
-                  </div>
-                </td>
-                <td>
-                   <span style={{ textTransform: 'capitalize', fontSize: '0.75rem', fontWeight: 800, color: COLUMNS.find(c => c.id === task.status)?.color }}>
-                     {COLUMNS.find(c => c.id === task.status)?.title}
-                   </span>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
     </div>
   );
 }

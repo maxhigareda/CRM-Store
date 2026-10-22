@@ -18,6 +18,17 @@ export interface CostRateItem {
   currency: string;
 }
 
+export interface TabuladorItem {
+  id?: string;
+  rol: string;
+  seniority?: string | null;
+  costo_hora_usd?: number | null;
+  costo_mensual_usd?: number | null;
+  costo_hora_mxn?: number | null;
+  costo_mensual_mxn?: number | null;
+  is_active?: boolean;
+}
+
 export interface CommittedResource {
   role_id: string;
   role_name: string;
