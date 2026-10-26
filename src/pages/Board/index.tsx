@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { 
   Plus, 
@@ -123,6 +123,7 @@ const TAG_COLORS = [
 
 export default function Board() {
   const { showNotification } = useNotification();
+  const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -143,6 +144,8 @@ export default function Board() {
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showGanttModal, setShowGanttModal] = useState(false);
   const [showCommercialEditModal, setShowCommercialEditModal] = useState(false);
+  const [showDeleteProjectConfirm, setShowDeleteProjectConfirm] = useState(false);
+  const [deletingProject, setDeletingProject] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [targetColumn, setTargetColumn] = useState('todo');
 
@@ -225,6 +228,38 @@ export default function Board() {
       console.error("Error loading board data:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const executeDeleteProjectFromBoard = async () => {
+    if (!projectId) return;
+    setDeletingProject(true);
+    try {
+      await Promise.allSettled([
+        supabase.from('tasks').delete().eq('project_id', projectId),
+        supabase.from('project_phases').delete().eq('project_id', projectId),
+        supabase.from('project_deliverables').delete().eq('project_id', projectId),
+        supabase.from('project_risks').delete().eq('project_id', projectId),
+        supabase.from('project_pos').delete().eq('project_id', projectId),
+        supabase.from('project_directory_members').delete().eq('project_id', projectId),
+        supabase.from('project_agreements_pending').delete().eq('project_id', projectId),
+        supabase.from('project_change_requests').delete().eq('project_id', projectId),
+        supabase.from('time_entries').delete().eq('project_id', projectId)
+      ]);
+
+      const { error } = await supabase.from('projects').delete().eq('id', projectId);
+      if (error) throw error;
+
+      localStorage.removeItem(`project_dir_${projectId}`);
+      localStorage.removeItem(`project_agreements_${projectId}`);
+
+      showNotification('success', 'Proyecto eliminado definitivamente');
+      navigate('/projects');
+    } catch (err: any) {
+      console.error('Error al eliminar proyecto:', err);
+      showNotification('error', 'Error al eliminar el proyecto: ' + (err.message || ''));
+      setDeletingProject(false);
+      setShowDeleteProjectConfirm(false);
     }
   };
 
@@ -444,6 +479,28 @@ export default function Board() {
                   <option value="En Pausa">En Pausa</option>
                 </select>
               )}
+
+              <button
+                type="button"
+                onClick={() => setShowDeleteProjectConfirm(true)}
+                className="btn btn-secondary"
+                style={{
+                  borderRadius: '10px',
+                  height: '34px',
+                  padding: '0 12px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  background: '#fff1f2',
+                  border: '1px solid #fecdd3',
+                  color: '#e11d48'
+                }}
+                title="Eliminar este proyecto definitivamente"
+              >
+                <Trash2 size={13} /> Eliminar Proyecto
+              </button>
             </div>
           </div>
         </div>
@@ -1024,6 +1081,22 @@ export default function Board() {
         onProjectCreated={(updated) => {
           setProject(prev => prev ? { ...prev, ...updated } : updated);
           fetchBoardData();
+        }}
+        onProjectDeleted={() => {
+          navigate('/projects');
+        }}
+      />
+
+      {/* Modal de Confirmación para Eliminar Proyecto desde el Tablero */}
+      <ConfirmModal
+        isOpen={showDeleteProjectConfirm}
+        title="Eliminar Proyecto Definitivamente"
+        message={`¿Estás seguro de que deseas eliminar permanentemente el proyecto "${project?.name}"? Esta acción borrará todas sus tareas, entregables, acuerdos, directorio y cronograma asociado. No se puede deshacer.`}
+        confirmText={deletingProject ? "Eliminando..." : "Eliminar Definitivamente"}
+        isDestructive={true}
+        onConfirm={executeDeleteProjectFromBoard}
+        onClose={() => {
+          if (!deletingProject) setShowDeleteProjectConfirm(false);
         }}
       />
     </div>

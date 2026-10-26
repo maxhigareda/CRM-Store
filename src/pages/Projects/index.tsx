@@ -29,6 +29,7 @@ import {
 import GanttChart from '../../components/Gantt/GanttChart';
 import { useNotification } from '../../contexts/NotificationContext';
 import CreateProjectCommercialModal from '../../components/Modals/CreateProjectCommercialModal';
+import { ConfirmModal } from '../../components/Modals';
 
 interface Phase {
   id?: string;
@@ -81,9 +82,49 @@ export default function Projects() {
   const [showModal, setShowModal] = useState(false);
   const [showCommercialModal, setShowCommercialModal] = useState(false);
   const [editingCommercialProject, setEditingCommercialProject] = useState<any | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [deletingProject, setDeletingProject] = useState(false);
   const [showPhaseEditor, setShowPhaseEditor] = useState(false);
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Borrado seguro y en cascada de proyectos
+  const executeDeleteProject = async () => {
+    if (!projectToDelete) return;
+    const pId = projectToDelete.id;
+    setDeletingProject(true);
+    try {
+      // 1. Borrar registros hijos dependientes de forma tolerante a fallos
+      await Promise.allSettled([
+        supabase.from('tasks').delete().eq('project_id', pId),
+        supabase.from('project_phases').delete().eq('project_id', pId),
+        supabase.from('project_deliverables').delete().eq('project_id', pId),
+        supabase.from('project_risks').delete().eq('project_id', pId),
+        supabase.from('project_pos').delete().eq('project_id', pId),
+        supabase.from('project_directory_members').delete().eq('project_id', pId),
+        supabase.from('project_agreements_pending').delete().eq('project_id', pId),
+        supabase.from('project_change_requests').delete().eq('project_id', pId),
+        supabase.from('time_entries').delete().eq('project_id', pId)
+      ]);
+
+      // 2. Borrar el proyecto
+      const { error } = await supabase.from('projects').delete().eq('id', pId);
+      if (error) throw error;
+
+      // 3. Limpiar almacenamiento local asociado
+      localStorage.removeItem(`project_dir_${pId}`);
+      localStorage.removeItem(`project_agreements_${pId}`);
+
+      setProjects(prev => prev.filter(p => p.id !== pId));
+      showNotification('success', `Proyecto "${projectToDelete.name}" eliminado definitivamente`);
+    } catch (err: any) {
+      console.error('Error al eliminar proyecto:', err);
+      showNotification('error', 'Error al eliminar proyecto: ' + (err.message || ''));
+    } finally {
+      setDeletingProject(false);
+      setProjectToDelete(null);
+    }
+  };
 
   // Columnas personalizables y reordenables
   const [tableColumns, setTableColumns] = useState<ProjectColumnConfig[]>(() => {
@@ -647,14 +688,24 @@ export default function Projects() {
                       if (col.id === 'actions') {
                         return (
                           <td key={col.id} style={{ textAlign: 'center' }}>
-                            <button 
-                              className="btn btn-secondary" 
-                              style={{ padding: '6px 8px', borderRadius: '8px', background: '#f5f3ff', borderColor: '#ddd6fe', color: '#6d28d9' }} 
-                              onClick={() => handleEditCommercial(p)} 
-                              title="Editar Configuración Inicial y Comercial (Cotización, Presupuesto, etc.)"
-                            >
-                              <Edit2 size={14} />
-                            </button>
+                            <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center', justifyContent: 'center' }}>
+                              <button 
+                                className="btn btn-secondary" 
+                                style={{ padding: '6px 8px', borderRadius: '8px', background: '#f5f3ff', borderColor: '#ddd6fe', color: '#6d28d9' }} 
+                                onClick={() => handleEditCommercial(p)} 
+                                title="Editar Configuración Inicial y Comercial (Cotización, Presupuesto, etc.)"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button 
+                                className="btn btn-secondary" 
+                                style={{ padding: '6px 8px', borderRadius: '8px', background: '#fff1f2', borderColor: '#fecdd3', color: '#e11d48' }} 
+                                onClick={() => setProjectToDelete(p)} 
+                                title="Eliminar Proyecto Definitivamente"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
                           </td>
                         );
                       }
@@ -787,6 +838,14 @@ export default function Projects() {
                           title="Editar Configuración Inicial y Comercial"
                         >
                           <Edit2 size={13} />
+                        </button>
+                        <button 
+                          className="btn btn-secondary" 
+                          style={{ padding: '4px 8px', borderRadius: '6px', background: '#fff1f2', borderColor: '#fecdd3', color: '#e11d48' }} 
+                          onClick={() => setProjectToDelete(p)} 
+                          title="Eliminar Proyecto Definitivamente"
+                        >
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     </div>
@@ -1377,6 +1436,21 @@ export default function Projects() {
             }
             return [updatedProject, ...prev];
           });
+        }}
+        onProjectDeleted={(pId) => {
+          setProjects(prev => prev.filter(p => p.id !== pId));
+        }}
+      />
+      {/* Modal de Confirmación para Eliminar Proyecto */}
+      <ConfirmModal 
+        isOpen={projectToDelete !== null}
+        title="Eliminar Proyecto Definitivamente"
+        message={`¿Estás seguro de que deseas eliminar permanentemente el proyecto "${projectToDelete?.name}"? Esta acción borrará todas sus tareas, entregables, acuerdos, directorio y cronograma asociado. No se puede deshacer.`}
+        confirmText={deletingProject ? "Eliminando..." : "Eliminar Definitivamente"}
+        isDestructive={true}
+        onConfirm={executeDeleteProject}
+        onClose={() => {
+          if (!deletingProject) setProjectToDelete(null);
         }}
       />
     </div>

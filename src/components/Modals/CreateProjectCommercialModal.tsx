@@ -25,6 +25,7 @@ interface CreateProjectCommercialModalProps {
   isOpen: boolean;
   onClose: () => void;
   onProjectCreated: (newProject: any) => void;
+  onProjectDeleted?: (projectId: string) => void;
   editingProject?: any | null;
 }
 
@@ -55,6 +56,7 @@ export default function CreateProjectCommercialModal({
   isOpen,
   onClose,
   onProjectCreated,
+  onProjectDeleted,
   editingProject
 }: CreateProjectCommercialModalProps) {
   const { showNotification } = useNotification();
@@ -429,6 +431,44 @@ export default function CreateProjectCommercialModal({
     }
   };
 
+  const handleDeleteCurrentProject = async () => {
+    if (!editingProject?.id) return;
+    if (!confirm(`¿Estás seguro de que deseas eliminar permanentemente el proyecto "${name}"? Esta acción borrará todas sus tareas, entregables, cronograma y directorio asociados y no se puede deshacer.`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const pId = editingProject.id;
+      await Promise.allSettled([
+        supabase.from('tasks').delete().eq('project_id', pId),
+        supabase.from('project_phases').delete().eq('project_id', pId),
+        supabase.from('project_deliverables').delete().eq('project_id', pId),
+        supabase.from('project_risks').delete().eq('project_id', pId),
+        supabase.from('project_pos').delete().eq('project_id', pId),
+        supabase.from('project_directory_members').delete().eq('project_id', pId),
+        supabase.from('project_agreements_pending').delete().eq('project_id', pId),
+        supabase.from('project_change_requests').delete().eq('project_id', pId),
+        supabase.from('time_entries').delete().eq('project_id', pId)
+      ]);
+
+      const { error } = await supabase.from('projects').delete().eq('id', pId);
+      if (error) throw error;
+
+      localStorage.removeItem(`project_dir_${pId}`);
+      localStorage.removeItem(`project_agreements_${pId}`);
+
+      showNotification('success', `Proyecto "${name}" eliminado definitivamente`);
+      if (onProjectDeleted) onProjectDeleted(pId);
+      onClose();
+    } catch (err: any) {
+      console.error(err);
+      showNotification('error', 'Error al eliminar proyecto: ' + (err.message || ''));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   const selectedClientObj = clients.find(c => c.id === clientId);
@@ -454,6 +494,19 @@ export default function CreateProjectCommercialModal({
           </div>
 
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            {editingProject && (
+              <button 
+                type="button" 
+                disabled={loading}
+                className="btn btn-secondary" 
+                style={{ padding: '12px 18px', borderRadius: '14px', background: '#fff1f2', borderColor: '#fecdd3', color: '#e11d48', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700 }} 
+                onClick={handleDeleteCurrentProject}
+                title="Eliminar este proyecto definitivamente"
+              >
+                <Trash2 size={16} />
+                <span>Eliminar Proyecto</span>
+              </button>
+            )}
             <button 
               type="button" 
               className="btn btn-secondary" 
