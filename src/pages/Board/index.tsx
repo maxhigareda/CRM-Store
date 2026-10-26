@@ -504,20 +504,22 @@ export default function Board() {
         </div>
       )}
 
-      {/* 2. Barra de Navegación de Vistas (Barra de Pestañas Limpia y Dedicada) */}
+      {/* 2. Barra de Navegación de Vistas (Organizada en 2 Líneas Limpias sin Scroll) */}
       <div 
         style={{ 
           background: 'white', 
           borderBottom: '1px solid #e2e8f0', 
-          padding: '0 32px', 
+          padding: '10px 32px 12px', 
           marginBottom: '20px',
-          overflowX: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
           boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 'max-content', padding: '10px 0' }}>
-          
-          {/* Bloque 1: Pastillas de Vistas de Tareas */}
+        {/* Línea 1: Vistas de Trabajo & Flujo Principal del PM */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          {/* Pastillas de Vistas de Tareas */}
           <div style={{ display: 'flex', background: '#f1f5f9', padding: '3px', borderRadius: '10px', gap: '2px' }}>
             <button 
               onClick={() => setViewMode('kanban')}
@@ -579,14 +581,14 @@ export default function Board() {
           </div>
 
           {/* Separador vertical sutil */}
-          <div style={{ width: '1px', height: '24px', background: '#e2e8f0', margin: '0 6px' }} />
+          <div style={{ width: '1px', height: '22px', background: '#e2e8f0' }} />
 
-          {/* Bloque 2: Pestañas de Gestión y Control Interno */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          {/* Pestañas del Flujo PM (Paso 1 a 4) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
             <button 
               onClick={() => setViewMode('directory')}
               style={{ 
-                padding: '7px 12px', 
+                padding: '6px 12px', 
                 borderRadius: '8px', 
                 display: 'flex', 
                 alignItems: 'center', 
@@ -605,7 +607,7 @@ export default function Board() {
             <button 
               onClick={() => setViewMode('deliverables')}
               style={{ 
-                padding: '7px 12px', 
+                padding: '6px 12px', 
                 borderRadius: '8px', 
                 display: 'flex', 
                 alignItems: 'center', 
@@ -624,7 +626,7 @@ export default function Board() {
             <button 
               onClick={() => setViewMode('agreements')}
               style={{ 
-                padding: '7px 12px', 
+                padding: '6px 12px', 
                 borderRadius: '8px', 
                 display: 'flex', 
                 alignItems: 'center', 
@@ -643,7 +645,7 @@ export default function Board() {
             <button 
               onClick={() => setViewMode('risks')}
               style={{ 
-                padding: '7px 12px', 
+                padding: '6px 12px', 
                 borderRadius: '8px', 
                 display: 'flex', 
                 alignItems: 'center', 
@@ -658,121 +660,128 @@ export default function Board() {
             >
               🛡️ Riesgos ({risks.length})
             </button>
-
-            <button 
-              onClick={() => setViewMode('timesheet')}
-              style={{ 
-                padding: '7px 12px', 
-                borderRadius: '8px', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '6px', 
-                fontSize: '0.8rem', 
-                fontWeight: 700, 
-                border: 'none', 
-                background: viewMode === 'timesheet' ? '#eff6ff' : 'transparent', 
-                color: viewMode === 'timesheet' ? '#2563eb' : '#64748b', 
-                cursor: 'pointer' 
-              }}
-            >
-              ⏱️ Timesheet
-            </button>
-
-            <button 
-              onClick={() => setViewMode('capacity')}
-              style={{ 
-                padding: '7px 12px', 
-                borderRadius: '8px', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '6px', 
-                fontSize: '0.8rem', 
-                fontWeight: 700, 
-                border: 'none', 
-                background: viewMode === 'capacity' ? '#f0fdf4' : 'transparent', 
-                color: viewMode === 'capacity' ? '#16a34a' : '#64748b', 
-                cursor: 'pointer' 
-              }}
-            >
-              👥 Capacidad
-            </button>
-
-            <button 
-              onClick={() => setViewMode('invoicing')}
-              style={{ 
-                padding: '7px 12px', 
-                borderRadius: '8px', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '6px', 
-                fontSize: '0.8rem', 
-                fontWeight: 700, 
-                border: 'none', 
-                background: viewMode === 'invoicing' ? '#ecfdf5' : 'transparent', 
-                color: viewMode === 'invoicing' ? '#059669' : '#64748b', 
-                cursor: 'pointer' 
-              }}
-            >
-              💳 Facturación
-            </button>
-
-            <button 
-              onClick={() => setViewMode('changes')}
-              style={{ 
-                padding: '7px 12px', 
-                borderRadius: '8px', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '6px', 
-                fontSize: '0.8rem', 
-                fontWeight: 700, 
-                border: 'none', 
-                background: viewMode === 'changes' ? '#f5f3ff' : 'transparent', 
-                color: viewMode === 'changes' ? '#7c3aed' : '#64748b', 
-                cursor: 'pointer' 
-              }}
-            >
-              🔄 Adendas
-            </button>
-
-            <button 
-              onClick={() => setViewMode('sustain')}
-              style={{ 
-                padding: '7px 12px', 
-                borderRadius: '8px', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '6px', 
-                fontSize: '0.8rem', 
-                fontWeight: 700, 
-                border: 'none', 
-                background: viewMode === 'sustain' ? '#fff7ed' : 'transparent', 
-                color: viewMode === 'sustain' ? '#ea580c' : '#64748b', 
-                cursor: 'pointer' 
-              }}
-            >
-              🚀 Sustain
-            </button>
-
-            <button 
-              onClick={() => setViewMode('documents')}
-              style={{ 
-                padding: '7px 12px', 
-                borderRadius: '8px', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '6px', 
-                fontSize: '0.8rem', 
-                fontWeight: 700, 
-                border: 'none', 
-                background: viewMode === 'documents' ? '#eff6ff' : 'transparent', 
-                color: viewMode === 'documents' ? '#2563eb' : '#64748b', 
-                cursor: 'pointer' 
-              }}
-            >
-              📄 Documentos
-            </button>
           </div>
+        </div>
+
+        {/* Línea 2: Operación, Finanzas y Cierre */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', borderTop: '1px solid #f1f5f9', paddingTop: '8px' }}>
+          <span style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: '4px' }}>
+            Operación & Control:
+          </span>
+
+          <button 
+            onClick={() => setViewMode('timesheet')}
+            style={{ 
+              padding: '5px 11px', 
+              borderRadius: '8px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '6px', 
+              fontSize: '0.78rem', 
+              fontWeight: 700, 
+              border: 'none', 
+              background: viewMode === 'timesheet' ? '#eff6ff' : 'transparent', 
+              color: viewMode === 'timesheet' ? '#2563eb' : '#64748b', 
+              cursor: 'pointer' 
+            }}
+          >
+            ⏱️ Timesheet
+          </button>
+
+          <button 
+            onClick={() => setViewMode('capacity')}
+            style={{ 
+              padding: '5px 11px', 
+              borderRadius: '8px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '6px', 
+              fontSize: '0.78rem', 
+              fontWeight: 700, 
+              border: 'none', 
+              background: viewMode === 'capacity' ? '#f0fdf4' : 'transparent', 
+              color: viewMode === 'capacity' ? '#16a34a' : '#64748b', 
+              cursor: 'pointer' 
+            }}
+          >
+            👥 Capacidad
+          </button>
+
+          <button 
+            onClick={() => setViewMode('invoicing')}
+            style={{ 
+              padding: '5px 11px', 
+              borderRadius: '8px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '6px', 
+              fontSize: '0.78rem', 
+              fontWeight: 700, 
+              border: 'none', 
+              background: viewMode === 'invoicing' ? '#ecfdf5' : 'transparent', 
+              color: viewMode === 'invoicing' ? '#059669' : '#64748b', 
+              cursor: 'pointer' 
+            }}
+          >
+            💳 Facturación
+          </button>
+
+          <button 
+            onClick={() => setViewMode('changes')}
+            style={{ 
+              padding: '5px 11px', 
+              borderRadius: '8px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '6px', 
+              fontSize: '0.78rem', 
+              fontWeight: 700, 
+              border: 'none', 
+              background: viewMode === 'changes' ? '#f5f3ff' : 'transparent', 
+              color: viewMode === 'changes' ? '#7c3aed' : '#64748b', 
+              cursor: 'pointer' 
+            }}
+          >
+            🔄 Adendas
+          </button>
+
+          <button 
+            onClick={() => setViewMode('sustain')}
+            style={{ 
+              padding: '5px 11px', 
+              borderRadius: '8px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '6px', 
+              fontSize: '0.78rem', 
+              fontWeight: 700, 
+              border: 'none', 
+              background: viewMode === 'sustain' ? '#fff7ed' : 'transparent', 
+              color: viewMode === 'sustain' ? '#ea580c' : '#64748b', 
+              cursor: 'pointer' 
+            }}
+          >
+            🚀 Sustain
+          </button>
+
+          <button 
+            onClick={() => setViewMode('documents')}
+            style={{ 
+              padding: '5px 11px', 
+              borderRadius: '8px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '6px', 
+              fontSize: '0.78rem', 
+              fontWeight: 700, 
+              border: 'none', 
+              background: viewMode === 'documents' ? '#eff6ff' : 'transparent', 
+              color: viewMode === 'documents' ? '#2563eb' : '#64748b', 
+              cursor: 'pointer' 
+            }}
+          >
+            📄 Documentos
+          </button>
         </div>
       </div>
 
