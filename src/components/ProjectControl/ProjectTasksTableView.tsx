@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { 
   Plus
 } from 'lucide-react';
@@ -137,19 +137,41 @@ export default function ProjectTasksTableView({
   const [newHasRisk, setNewHasRisk] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Miembros resueltos con fallback garantizado a localStorage
+  const [effectiveMembers, setEffectiveMembers] = useState<DirectoryMember[]>(directoryMembers);
+
+  useEffect(() => {
+    if (directoryMembers && directoryMembers.length > 0) {
+      setEffectiveMembers(directoryMembers);
+    } else if (projectId) {
+      const cached = localStorage.getItem(`project_dir_${projectId}`);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setEffectiveMembers(parsed);
+          }
+        } catch (e) {
+          console.warn('Error reading cached directory in tasks:', e);
+        }
+      }
+    }
+  }, [directoryMembers, projectId]);
+
   // Lista de todos los roles únicos disponibles (combinando propuesta + directorio)
   const allAvailableRoles = useMemo(() => {
     const rolesSet = new Set<string>();
     committedRoles.forEach(r => rolesSet.add(r));
-    directoryMembers.forEach(m => {
+    effectiveMembers.forEach(m => {
       if (m.role_title) rolesSet.add(m.role_title);
+      if (m.secondary_role_title) rolesSet.add(m.secondary_role_title);
     });
     // Roles base si no hay ninguno
     if (rolesSet.size === 0) {
       ['Project Manager', 'Data Engineer', 'BI Visualization Developer', 'Analista'].forEach(r => rolesSet.add(r));
     }
     return Array.from(rolesSet);
-  }, [committedRoles, directoryMembers]);
+  }, [committedRoles, effectiveMembers]);
 
   // Manejador de cambio de rol en una tarea existente con regla de negocio de Adenda
   const handleRoleChange = async (taskId: string, selectedRole: string) => {
@@ -510,7 +532,7 @@ export default function ProjectTasksTableView({
               </select>
             </div>
 
-            {/* Responsable (Filtrado por Rol en Directorio) */}
+            {/* Responsable (Directorio con agrupación inteligente por rol) */}
             <div>
               <label style={{ fontSize: '0.68rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>
                 RESPONSABLE (DIRECTORIO)
@@ -521,13 +543,44 @@ export default function ProjectTasksTableView({
                 onChange={e => setNewMemberId(e.target.value)}
                 style={{ width: '100%', height: '38px', borderRadius: '8px', fontSize: '0.8rem' }}
               >
-                <option value="">Sin asignar...</option>
-                {directoryMembers
-                  .filter(m => !newRole || m.role_title?.toLowerCase() === newRole.toLowerCase() || m.role_title?.toLowerCase().includes(newRole.toLowerCase()) || newRole.toLowerCase().includes(m.role_title?.toLowerCase()))
+                <option value="">Sin asignar ({effectiveMembers.length} en directorio)...</option>
+                {/* 1. Coincidentes con el rol */}
+                {effectiveMembers
+                  .filter(m => {
+                    if (!newRole) return true;
+                    const r = newRole.toLowerCase();
+                    return (m.role_title && (m.role_title.toLowerCase() === r || m.role_title.toLowerCase().includes(r) || r.includes(m.role_title.toLowerCase()))) ||
+                           (m.secondary_role_title && (m.secondary_role_title.toLowerCase() === r || m.secondary_role_title.toLowerCase().includes(r) || r.includes(m.secondary_role_title.toLowerCase())));
+                  })
                   .map(m => (
-                    <option key={m.id} value={m.id}>{m.name} ({m.group_type})</option>
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.group_type} - {m.role_title})
+                    </option>
                   ))
                 }
+                {/* 2. Otros miembros del directorio (si hay filtro de rol) */}
+                {newRole && effectiveMembers.some(m => {
+                  const r = newRole.toLowerCase();
+                  const match = (m.role_title && (m.role_title.toLowerCase() === r || m.role_title.toLowerCase().includes(r) || r.includes(m.role_title.toLowerCase()))) ||
+                                (m.secondary_role_title && (m.secondary_role_title.toLowerCase() === r || m.secondary_role_title.toLowerCase().includes(r) || r.includes(m.secondary_role_title.toLowerCase())));
+                  return !match;
+                }) && (
+                  <optgroup label="── Otros colaboradores del directorio ──">
+                    {effectiveMembers
+                      .filter(m => {
+                        const r = newRole.toLowerCase();
+                        const match = (m.role_title && (m.role_title.toLowerCase() === r || m.role_title.toLowerCase().includes(r) || r.includes(m.role_title.toLowerCase()))) ||
+                                      (m.secondary_role_title && (m.secondary_role_title.toLowerCase() === r || m.secondary_role_title.toLowerCase().includes(r) || r.includes(m.secondary_role_title.toLowerCase())));
+                        return !match;
+                      })
+                      .map(m => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} ({m.group_type} - {m.role_title})
+                        </option>
+                      ))
+                    }
+                  </optgroup>
+                )}
               </select>
             </div>
 
@@ -601,12 +654,13 @@ export default function ProjectTasksTableView({
                 const badge = getStatusBadge(autoStatus);
 
                 // Miembros filtrados por el rol de la tarea
-                const matchingMembers = directoryMembers.filter(m => {
+                const matchingMembers = effectiveMembers.filter(m => {
                   if (!task.required_role) return true;
-                  return m.role_title?.toLowerCase() === task.required_role.toLowerCase() ||
-                         m.role_title?.toLowerCase().includes(task.required_role.toLowerCase()) ||
-                         task.required_role.toLowerCase().includes(m.role_title?.toLowerCase());
+                  const r = task.required_role.toLowerCase();
+                  return (m.role_title && (m.role_title.toLowerCase() === r || m.role_title.toLowerCase().includes(r) || r.includes(m.role_title.toLowerCase()))) ||
+                         (m.secondary_role_title && (m.secondary_role_title.toLowerCase() === r || m.secondary_role_title.toLowerCase().includes(r) || r.includes(m.secondary_role_title.toLowerCase())));
                 });
+                const otherMembers = effectiveMembers.filter(m => !matchingMembers.some(match => match.id === m.id));
 
 
                 return (
@@ -724,7 +778,7 @@ export default function ProjectTasksTableView({
                       </select>
                     </td>
 
-                    {/* 10. Responsable (Filtrado por Rol del Directorio) */}
+                    {/* 10. Responsable (Filtrado por Rol del Directorio con opción de ver todos) */}
                     <td style={{ padding: '12px 14px' }}>
                       <select
                         value={task.directory_member_id || ''}
@@ -742,10 +796,21 @@ export default function ProjectTasksTableView({
                           maxWidth: '140px'
                         }}
                       >
-                        <option value="">Sin asignar...</option>
-                        {matchingMembers.map(m => (
-                          <option key={m.id} value={m.id}>{m.name} ({m.group_type})</option>
-                        ))}
+                        <option value="">Sin asignar ({effectiveMembers.length} en dir)...</option>
+                        {matchingMembers.length > 0 && (
+                          <optgroup label="✨ Coinciden con Rol">
+                            {matchingMembers.map(m => (
+                              <option key={m.id} value={m.id}>{m.name} ({m.group_type})</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {task.required_role && otherMembers.length > 0 && (
+                          <optgroup label="👥 Otros del Directorio">
+                            {otherMembers.map(m => (
+                              <option key={m.id} value={m.id}>{m.name} ({m.group_type} - {m.role_title})</option>
+                            ))}
+                          </optgroup>
+                        )}
                       </select>
                     </td>
 

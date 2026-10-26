@@ -6,7 +6,8 @@ import {
   Clock, 
   Layers, 
   AlertCircle,
-  Edit2
+  Edit2,
+  ExternalLink
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -32,6 +33,8 @@ export default function DeliverablesManager({
   // Form State
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [scopeDefinition, setScopeDefinition] = useState('');
+  const [scopeDocumentUrl, setScopeDocumentUrl] = useState('');
   const [weightPct, setWeightPct] = useState<number>(20);
   const [acceptanceCriteria, setAcceptanceCriteria] = useState('');
   const [baselineStartDate, setBaselineStartDate] = useState('');
@@ -46,6 +49,8 @@ export default function DeliverablesManager({
     setEditingItem(null);
     setName('');
     setDescription('');
+    setScopeDefinition('');
+    setScopeDocumentUrl('');
     // Proponer peso restante
     const remaining = Math.max(0, 100 - totalWeight);
     setWeightPct(remaining > 0 ? remaining : 10);
@@ -59,6 +64,8 @@ export default function DeliverablesManager({
     setEditingItem(item);
     setName(item.name);
     setDescription(item.description || '');
+    setScopeDefinition(item.scope_definition || '');
+    setScopeDocumentUrl(item.scope_document_url || '');
     setWeightPct(item.weight_pct);
     setAcceptanceCriteria(item.acceptance_criteria || '');
     setBaselineStartDate(item.baseline_start_date || '');
@@ -73,38 +80,56 @@ export default function DeliverablesManager({
 
     setSaving(true);
     try {
-      if (editingItem && editingItem.id) {
-        const { error } = await supabase
-          .from('project_deliverables')
-          .update({
-            name: name.trim(),
-            description: description.trim() || null,
-            weight_pct: weightPct,
-            acceptance_criteria: acceptanceCriteria.trim() || null,
-            baseline_start_date: baselineStartDate || null,
-            baseline_end_date: baselineEndDate || null,
-            current_end_date: baselineEndDate || null
-          })
-          .eq('id', editingItem.id);
+      const payload: Record<string, any> = {
+        name: name.trim(),
+        description: description.trim() || null,
+        scope_definition: scopeDefinition.trim() || null,
+        scope_document_url: scopeDocumentUrl.trim() || null,
+        weight_pct: weightPct,
+        acceptance_criteria: acceptanceCriteria.trim() || null,
+        baseline_start_date: baselineStartDate || null,
+        baseline_end_date: baselineEndDate || null,
+        current_end_date: baselineEndDate || null
+      };
 
-        if (error) throw error;
+      if (editingItem && editingItem.id) {
+        let currentPayload = { ...payload };
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const { error } = await supabase
+            .from('project_deliverables')
+            .update(currentPayload)
+            .eq('id', editingItem.id);
+
+          if (!error) break;
+
+          const match = error.message.match(/Could not find the '([^']+)' column/i);
+          if (match && match[1] && match[1] in currentPayload) {
+            delete currentPayload[match[1]];
+            continue;
+          }
+          throw error;
+        }
         showNotification('success', 'Entregable actualizado');
       } else {
-        const { error } = await supabase
-          .from('project_deliverables')
-          .insert([{
-            project_id: projectId,
-            name: name.trim(),
-            description: description.trim() || null,
-            weight_pct: weightPct,
-            status: 'pending',
-            acceptance_criteria: acceptanceCriteria.trim() || null,
-            baseline_start_date: baselineStartDate || null,
-            baseline_end_date: baselineEndDate || null,
-            current_end_date: baselineEndDate || null
-          }]);
+        let currentPayload: Record<string, any> = {
+          project_id: projectId,
+          status: 'pending',
+          ...payload
+        };
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const { error } = await supabase
+            .from('project_deliverables')
+            .insert([currentPayload]);
 
-        if (error) throw error;
+          if (!error) break;
+
+          const match = error.message.match(/Could not find the '([^']+)' column/i);
+          if (match && match[1] && match[1] in currentPayload) {
+            delete currentPayload[match[1]];
+            continue;
+          }
+          throw error;
+        }
         showNotification('success', 'Entregable creado exitosamente');
       }
 
@@ -273,6 +298,30 @@ export default function DeliverablesManager({
                     </p>
                   )}
 
+                  {/* Alcance / Definición adjunta del entregable */}
+                  {(item.scope_definition || item.scope_document_url) && (
+                    <div style={{ marginTop: '10px', background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '10px 12px', borderRadius: '8px', fontSize: '0.78rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span style={{ fontWeight: 800, color: '#6d28d9' }}>📐 Alcance & Definición:</span>
+                        {item.scope_document_url && (
+                          <a 
+                            href={item.scope_document_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            style={{ color: '#6d28d9', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'underline' }}
+                          >
+                            <ExternalLink size={12} /> Ver Documento
+                          </a>
+                        )}
+                      </div>
+                      {item.scope_definition && (
+                        <p style={{ margin: 0, color: '#475569', lineHeight: 1.4, whiteSpace: 'pre-line' }}>
+                          {item.scope_definition}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {item.acceptance_criteria && (
                     <div style={{ marginTop: '10px', background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', fontSize: '0.75rem', color: '#475569' }}>
                       <strong>Criterio de Aceptación:</strong> {item.acceptance_criteria}
@@ -384,6 +433,32 @@ export default function DeliverablesManager({
 
               <div>
                 <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>
+                  DEFINICIÓN DETALLADA / ALCANCE DEL ENTREGABLE
+                </label>
+                <textarea
+                  rows={3}
+                  value={scopeDefinition}
+                  onChange={e => setScopeDefinition(e.target.value)}
+                  placeholder="Detalla de forma exhaustiva los componentes, requerimientos y alcance acordado..."
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', resize: 'vertical' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>
+                  ADJUNTAR ENLACE AL DOCUMENTO DE ALCANCE (GOOGLE DRIVE / FIGMA / DOCS)
+                </label>
+                <input
+                  type="url"
+                  value={scopeDocumentUrl}
+                  onChange={e => setScopeDocumentUrl(e.target.value)}
+                  placeholder="https://docs.google.com/... o https://drive.google.com/..."
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>
                   CRITERIO DE ACEPTACIÓN
                 </label>
                 <textarea
@@ -397,13 +472,13 @@ export default function DeliverablesManager({
 
               <div>
                 <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '4px' }}>
-                  DESCRIPCIÓN DEL ALCANCE
+                  NOTAS ADICIONALES (OPCIONAL)
                 </label>
                 <textarea
                   rows={2}
                   value={description}
                   onChange={e => setDescription(e.target.value)}
-                  placeholder="Detalla qué incluye y qué excluye este entregable..."
+                  placeholder="Cualquier nota extra del PM..."
                   style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', resize: 'vertical' }}
                 />
               </div>

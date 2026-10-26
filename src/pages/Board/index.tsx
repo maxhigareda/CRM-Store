@@ -58,6 +58,7 @@ import MilestonesInvoicingManager from '../../components/ProjectControl/Mileston
 import SustainHandoffManager from '../../components/ProjectControl/SustainHandoffManager';
 import ChangeRequestsManager from '../../components/ProjectControl/ChangeRequestsManager';
 import ProjectDocumentsView from '../../components/ProjectControl/ProjectDocumentsView';
+import CreateProjectCommercialModal from '../../components/Modals/CreateProjectCommercialModal';
 import ProjectDirectoryManager from '../../components/ProjectControl/ProjectDirectoryManager';
 import type { DirectoryMember } from '../../components/ProjectControl/ProjectDirectoryManager';
 import ProjectAgreementsManager from '../../components/ProjectControl/ProjectAgreementsManager';
@@ -141,6 +142,7 @@ export default function Board() {
   
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showGanttModal, setShowGanttModal] = useState(false);
+  const [showCommercialEditModal, setShowCommercialEditModal] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [targetColumn, setTargetColumn] = useState('todo');
 
@@ -199,7 +201,22 @@ export default function Board() {
       if (delivRes?.data) setDeliverables(delivRes.data || []);
       if (risksRes?.data) setRisks(risksRes.data || []);
       if (posRes?.data) setPos(posRes.data || []);
-      if (dirRes?.data) setDirectoryMembers(dirRes.data || []);
+      
+      let loadedMembers = dirRes?.data || [];
+      if (loadedMembers.length === 0 && projectId) {
+        const cached = localStorage.getItem(`project_dir_${projectId}`);
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              loadedMembers = parsed;
+            }
+          } catch (e) {
+            console.warn('Error reading directory from local storage:', e);
+          }
+        }
+      }
+      setDirectoryMembers(loadedMembers);
       if (internalProjRes.data) {
         const uniqueProjects = Array.from(new Set(internalProjRes.data.map((t: any) => t.internal_project_name).filter(Boolean)));
         setGlobalInternalProjects(uniqueProjects as string[]);
@@ -431,6 +448,61 @@ export default function Board() {
           </div>
         </div>
       </div>
+
+      {/* Alerta de Configuración Inicial Incompleta */}
+      {project && (!project.proposal_url || !(project as any).quoted_budget || Number((project as any).quoted_budget) <= 0) && (
+        <div style={{
+          margin: '0 32px 16px',
+          background: '#fff1f2',
+          border: '2px solid #fecdd3',
+          borderRadius: '14px',
+          padding: '14px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px',
+          boxShadow: '0 4px 12px rgba(225, 29, 72, 0.06)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ background: '#ffe4e6', padding: '8px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <AlertTriangle size={20} color="#e11d48" />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#9f1239' }}>
+                La configuración inicial del proyecto está incompleta
+              </div>
+              <div style={{ fontSize: '0.8rem', color: '#be123c' }}>
+                {!project.proposal_url && !(project as any).quoted_budget 
+                  ? 'Falta adjuntar el enlace de la cotización y registrar el presupuesto de venta.' 
+                  : !project.proposal_url 
+                    ? 'Falta adjuntar el link de la cotización (Google Drive).' 
+                    : 'Falta registrar el presupuesto cotizado.'}
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowCommercialEditModal(true)}
+            style={{
+              background: '#e11d48',
+              color: 'white',
+              border: 'none',
+              borderRadius: '10px',
+              padding: '8px 18px',
+              fontSize: '0.82rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 6px rgba(225, 29, 72, 0.3)'
+            }}
+          >
+            <Edit2 size={14} /> Completar Configuración Inicial
+          </button>
+        </div>
+      )}
 
       {/* 2. Barra de Navegación de Vistas (Barra de Pestañas Limpia y Dedicada) */}
       <div 
@@ -935,6 +1007,16 @@ export default function Board() {
           </div>
         </div>
       )}
+      {/* Modal de Edición Comercial y Control Interno */}
+      <CreateProjectCommercialModal
+        isOpen={showCommercialEditModal}
+        editingProject={project}
+        onClose={() => setShowCommercialEditModal(false)}
+        onProjectCreated={(updated) => {
+          setProject(prev => prev ? { ...prev, ...updated } : updated);
+          fetchBoardData();
+        }}
+      />
     </div>
   );
 }

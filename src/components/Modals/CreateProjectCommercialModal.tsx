@@ -25,6 +25,7 @@ interface CreateProjectCommercialModalProps {
   isOpen: boolean;
   onClose: () => void;
   onProjectCreated: (newProject: any) => void;
+  editingProject?: any | null;
 }
 
 // Catálogo de roles tabulador con tarifas promedio
@@ -46,15 +47,15 @@ interface DynamicCommittedRoleRow {
   id: string;
   role_name: string;
   seniority: string;
-  weeks: number;
-  hours_per_week: number;
+  hours: number;
   hourly_rate: number;
 }
 
 export default function CreateProjectCommercialModal({
   isOpen,
   onClose,
-  onProjectCreated
+  onProjectCreated,
+  editingProject
 }: CreateProjectCommercialModalProps) {
   const { showNotification } = useNotification();
   const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
@@ -84,14 +85,13 @@ export default function CreateProjectCommercialModal({
   const [quotedBudget, setQuotedBudget] = useState<number>(0);
   const [targetMarginPct, setTargetMarginPct] = useState<number>(35);
   
-  // Líneas dinámicas de roles del tabulador (por defecto al menos 1 línea visible)
+  // Líneas dinámicas de roles del tabulador (por defecto al menos 1 línea visible, configurado SOLO EN HORAS)
   const [committedRoleRows, setCommittedRoleRows] = useState<DynamicCommittedRoleRow[]>([
     {
       id: 'row-1',
       role_name: 'Project / Product Manager',
       seniority: 'Medium (3-5)',
-      weeks: 4,
-      hours_per_week: 40,
+      hours: 80,
       hourly_rate: 632.00
     }
   ]);
@@ -106,12 +106,66 @@ export default function CreateProjectCommercialModal({
   const [newPoDocUrl, setNewPoDocUrl] = useState('');
   const [newPoJustification, setNewPoJustification] = useState('');
 
-  // Cargar catálogos
+  // Cargar catálogos y precargar si es edición
   useEffect(() => {
     if (isOpen) {
       fetchInitialData();
+      if (editingProject) {
+        setName(editingProject.name || '');
+        setClientId(editingProject.client_id || '');
+        setClientContactName(editingProject.client_contact_name || '');
+        setStakeholderEmail(editingProject.stakeholder_email || '');
+        setPmId(editingProject.pm_id || '');
+        setProposalUrl(editingProject.proposal_url || '');
+        setGoogleDriveFolderUrl(editingProject.google_drive_folder_url || '');
+        setStartDate(editingProject.delivery_date || editingProject.baseline_start_date || new Date().toISOString().split('T')[0]);
+        setDurationWeeks(editingProject.duration_weeks || 4);
+        setQuotedBudget(Number(editingProject.quoted_budget) || 0);
+        setTargetMarginPct(editingProject.target_margin_pct ?? 35);
+        setPaymentScheme(editingProject.payment_scheme || 'por_entregables');
+
+        if (editingProject.committed_roles_breakdown && Array.isArray(editingProject.committed_roles_breakdown) && editingProject.committed_roles_breakdown.length > 0) {
+          setCommittedRoleRows(editingProject.committed_roles_breakdown.map((r: any, idx: number) => ({
+            id: r.id || `row-${idx}`,
+            role_name: r.role_name || 'Project / Product Manager',
+            seniority: r.seniority || 'Medium (3-5)',
+            hours: Number(r.hours || (r.weeks ? r.weeks * 40 : 80)),
+            hourly_rate: Number(r.hourly_rate) || 632.00
+          })));
+        } else if (editingProject.quoted_hours > 0) {
+          setCommittedRoleRows([{
+            id: 'row-1',
+            role_name: 'Project / Product Manager',
+            seniority: 'Medium (3-5)',
+            hours: Number(editingProject.quoted_hours),
+            hourly_rate: 632.00
+          }]);
+        }
+      } else {
+        setName('');
+        setClientId('');
+        setClientContactName('');
+        setStakeholderEmail('');
+        setPmId('');
+        setProposalUrl('');
+        setGoogleDriveFolderUrl('');
+        setStartDate(new Date().toISOString().split('T')[0]);
+        setDurationWeeks(4);
+        setQuotedBudget(0);
+        setTargetMarginPct(35);
+        setCommittedRoleRows([
+          {
+            id: 'row-1',
+            role_name: 'Project / Product Manager',
+            seniority: 'Medium (3-5)',
+            hours: 80,
+            hourly_rate: 632.00
+          }
+        ]);
+        setPos([]);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, editingProject]);
 
   const fetchInitialData = async () => {
     try {
@@ -174,15 +228,15 @@ export default function CreateProjectCommercialModal({
     }
   }, [startDate, durationWeeks, holidays]);
 
-  // Cálculos de Margen y Costos usando roles dinámicos del tabulador
-  const totalCommittedHours = committedRoleRows.reduce((acc, curr) => acc + (Number(curr.weeks || 0) * Number(curr.hours_per_week || 40)), 0);
-  const totalEstimatedCost = committedRoleRows.reduce((acc, curr) => acc + ((Number(curr.weeks || 0) * Number(curr.hours_per_week || 40)) * (Number(curr.hourly_rate) || 0)), 0);
+  // Cálculos de Margen y Costos usando roles dinámicos del tabulador (SOLO HORAS)
+  const totalCommittedHours = committedRoleRows.reduce((acc, curr) => acc + Number(curr.hours || 0), 0);
+  const totalEstimatedCost = committedRoleRows.reduce((acc, curr) => acc + (Number(curr.hours || 0) * (Number(curr.hourly_rate) || 0)), 0);
   const calculatedMarginMoney = quotedBudget > 0 ? (quotedBudget - totalEstimatedCost) : 0;
   const calculatedMarginPct = quotedBudget > 0 ? ((calculatedMarginMoney / quotedBudget) * 100) : 0;
   const totalPosAmount = pos.reduce((acc, curr) => acc + (Number(curr.po_amount) || 0), 0);
   const poMismatch = quotedBudget > 0 && totalPosAmount > 0 && Math.abs(totalPosAmount - quotedBudget) > 1.0;
 
-  // Manejo dinámico de roles en la propuesta
+  // Manejo dinámico de roles en la propuesta (SOLO HORAS)
   const handleAddRoleRow = () => {
     setCommittedRoleRows(prev => [
       ...prev,
@@ -190,8 +244,7 @@ export default function CreateProjectCommercialModal({
         id: 'row-' + Date.now(),
         role_name: tabuladorRoles[0]?.role_name || 'Data Engineer',
         seniority: tabuladorRoles[0]?.seniority || 'Medium (3-5)',
-        weeks: durationWeeks || 4,
-        hours_per_week: 40,
+        hours: 80,
         hourly_rate: tabuladorRoles[0]?.hourly_rate || 589.80
       }
     ]);
@@ -249,7 +302,7 @@ export default function CreateProjectCommercialModal({
     setNewPoJustification('');
   };
 
-  // Creación Resiliente de Proyecto (Sin Bloqueos por Columnas Faltantes)
+  // Creación o Actualización Resiliente de Proyecto (Sin Bloqueos por Columnas Faltantes)
   const handleSubmitProject = async () => {
     if (!name.trim()) return showNotification('error', 'El nombre del proyecto es obligatorio');
     if (!clientId) return showNotification('error', 'Selecciona un cliente');
@@ -277,14 +330,52 @@ export default function CreateProjectCommercialModal({
         estimated_cost: totalEstimatedCost,
         target_margin_pct: targetMarginPct,
         payment_scheme: paymentScheme,
-        status: 'todo',
-        stage: 'arranque',
-        current_baseline_version: 1
+        committed_roles_breakdown: committedRoleRows
       };
+
+      if (!editingProject) {
+        fullPayload.status = 'todo';
+        fullPayload.stage = 'arranque';
+        fullPayload.current_baseline_version = 1;
+      }
 
       let projectData: any = null;
       let currentPayload = { ...fullPayload };
 
+      if (editingProject?.id) {
+        // Modo Actualización
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const { data, error: projErr } = await supabase
+            .from('projects')
+            .update(currentPayload)
+            .eq('id', editingProject.id)
+            .select(`*, clients(name, reference_name)`)
+            .single();
+
+          if (!projErr) {
+            projectData = data;
+            break;
+          }
+
+          const missingColMatch = projErr.message.match(/Could not find the '([^']+)' column/i) ||
+                                  projErr.message.match(/column "?([^"\s]+)"? of relation "?projects"? does not exist/i);
+          if (missingColMatch && missingColMatch[1] && missingColMatch[1] in currentPayload) {
+            const colToRemove = missingColMatch[1];
+            console.warn(`Omitiendo columna no existente en BD al actualizar: ${colToRemove}`);
+            delete currentPayload[colToRemove];
+            continue;
+          }
+
+          throw projErr;
+        }
+
+        showNotification('success', `Proyecto "${name}" actualizado con éxito`);
+        onProjectCreated(projectData || { id: editingProject.id, ...currentPayload });
+        onClose();
+        return;
+      }
+
+      // Modo Creación
       for (let attempt = 0; attempt < 6; attempt++) {
         const { data, error: projErr } = await supabase
           .from('projects')
@@ -354,10 +445,10 @@ export default function CreateProjectCommercialModal({
             </div>
             <div>
               <h2 className="modal-title" style={{ fontSize: '1.75rem', fontWeight: 800, color: '#0f172a' }}>
-                Alta Comercial & Control Interno
+                {editingProject ? 'Editar Proyecto & Control Interno' : 'Alta Comercial & Control Interno'}
               </h2>
               <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-                Configuración completa de cotización, margen proyectado, stakeholder y POs
+                {editingProject ? 'Modifica cotización, presupuesto, links y configuración inicial' : 'Configuración completa de cotización, margen proyectado, stakeholder y POs'}
               </div>
             </div>
           </div>
@@ -385,7 +476,7 @@ export default function CreateProjectCommercialModal({
               onClick={handleSubmitProject}
             >
               {loading ? <Loader2 size={18} className="animate-spin" /> : <FileCheck size={18} />}
-              <span>Dar de Alta Proyecto</span>
+              <span>{editingProject ? 'Guardar Cambios' : 'Dar de Alta Proyecto'}</span>
             </button>
             <div style={{ width: '1px', height: '32px', background: 'var(--border-color)', margin: '0 8px' }}></div>
             <button 
@@ -737,10 +828,10 @@ export default function CreateProjectCommercialModal({
                     </div>
                   </div>
 
-                  {/* Lista Dinámica de Roles */}
+                  {/* Lista Dinámica de Roles (Configuración SOLO EN HORAS, sin corte de texto) */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
                     {committedRoleRows.map((row, idx) => {
-                      const rowHours = Number(row.weeks || 0) * Number(row.hours_per_week || 40);
+                      const rowHours = Number(row.hours || 0);
                       const rowCost = rowHours * Number(row.hourly_rate || 0);
 
                       return (
@@ -748,25 +839,35 @@ export default function CreateProjectCommercialModal({
                           key={row.id} 
                           style={{ 
                             display: 'grid', 
-                            gridTemplateColumns: '2fr 100px 90px 100px 40px', 
-                            gap: '10px', 
+                            gridTemplateColumns: 'minmax(220px, 1.8fr) 140px 130px 40px', 
+                            gap: '14px', 
                             alignItems: 'center', 
                             background: '#f8fafc', 
-                            padding: '12px 14px', 
+                            padding: '12px 16px', 
                             borderRadius: '12px', 
                             border: '1px solid #e2e8f0' 
                           }}
                         >
-                          {/* 1. Selector de Rol del Tabulador */}
+                          {/* 1. Selector de Rol del Tabulador (Texto amplio y visible) */}
                           <div>
-                            <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '3px' }}>
+                            <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>
                               ROL #{idx + 1} (TABULADOR)
                             </label>
                             <select
                               className="form-input"
                               value={row.role_name}
                               onChange={e => handleUpdateRoleRow(row.id, { role_name: e.target.value })}
-                              style={{ width: '100%', height: '36px', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 700, marginBottom: 0 }}
+                              style={{ 
+                                width: '100%', 
+                                height: '42px', 
+                                padding: '0 12px', 
+                                borderRadius: '10px', 
+                                fontSize: '0.85rem', 
+                                fontWeight: 700, 
+                                marginBottom: 0,
+                                boxSizing: 'border-box',
+                                lineHeight: 'normal'
+                              }}
                             >
                               {tabuladorRoles.map(tr => (
                                 <option key={tr.role_name} value={tr.role_name}>
@@ -776,44 +877,47 @@ export default function CreateProjectCommercialModal({
                             </select>
                           </div>
 
-                          {/* 2. Tiempo Asignado (Semanas) */}
+                          {/* 2. Tiempo Asignado: SOLO HORAS HABILITADO */}
                           <div>
-                            <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '3px' }}>
-                              SEMANAS
+                            <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px' }}>
+                              HORAS ASIGNADAS
                             </label>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <div style={{ position: 'relative' }}>
                               <input 
                                 type="number"
                                 min={1}
-                                value={row.weeks}
-                                onChange={e => handleUpdateRoleRow(row.id, { weeks: Number(e.target.value) })}
-                                style={{ width: '100%', height: '36px', padding: '0 8px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.85rem', fontWeight: 800, textAlign: 'center' }}
+                                step={1}
+                                value={row.hours}
+                                onChange={e => handleUpdateRoleRow(row.id, { hours: Number(e.target.value) })}
+                                style={{ 
+                                  width: '100%', 
+                                  height: '42px', 
+                                  padding: '0 32px 0 12px', 
+                                  borderRadius: '10px', 
+                                  border: '1px solid #cbd5e1', 
+                                  fontSize: '0.9rem', 
+                                  fontWeight: 800, 
+                                  textAlign: 'center',
+                                  boxSizing: 'border-box'
+                                }}
                               />
-                              <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 700 }}>sem</span>
+                              <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '0.75rem', color: '#64748b', fontWeight: 700 }}>
+                                hrs
+                              </span>
                             </div>
                           </div>
 
-                          {/* 3. Horas Resultantes */}
+                          {/* 3. Costo Total de la Línea */}
                           <div>
-                            <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '3px' }}>
-                              HORAS
-                            </label>
-                            <div style={{ height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'white', borderRadius: '8px', border: '1px solid #cbd5e1', fontWeight: 800, fontSize: '0.85rem', color: '#0f172a' }}>
-                              {rowHours}h
-                            </div>
-                          </div>
-
-                          {/* 4. Costo Total de la Línea */}
-                          <div>
-                            <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '3px', textAlign: 'right' }}>
+                            <label style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '4px', textAlign: 'right' }}>
                               COSTO TOTAL
                             </label>
-                            <div style={{ height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', fontWeight: 800, fontSize: '0.85rem', color: '#334155' }}>
+                            <div style={{ height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', fontWeight: 800, fontSize: '0.95rem', color: '#334155' }}>
                               ${rowCost.toLocaleString('es-MX')}
                             </div>
                           </div>
 
-                          {/* 5. Botón Eliminar Fila */}
+                          {/* 4. Botón Eliminar Fila */}
                           <div style={{ display: 'flex', justifyContent: 'center' }}>
                             <button
                               type="button"
@@ -821,7 +925,7 @@ export default function CreateProjectCommercialModal({
                               style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', padding: '6px' }}
                               title="Eliminar rol de la cotización"
                             >
-                              <Trash2 size={16} />
+                              <Trash2 size={18} />
                             </button>
                           </div>
                         </div>

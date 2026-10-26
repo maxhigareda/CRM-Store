@@ -63,6 +63,27 @@ export default function ProjectAgreementsManager({
   const [impact, setImpact] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Miembros resueltos con fallback garantizado a localStorage
+  const [effectiveMembers, setEffectiveMembers] = useState<DirectoryMember[]>(directoryMembers);
+
+  useEffect(() => {
+    if (directoryMembers && directoryMembers.length > 0) {
+      setEffectiveMembers(directoryMembers);
+    } else if (projectId) {
+      const cached = localStorage.getItem(`project_dir_${projectId}`);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setEffectiveMembers(parsed);
+          }
+        } catch (e) {
+          console.warn('Error reading cached directory in agreements:', e);
+        }
+      }
+    }
+  }, [directoryMembers, projectId]);
+
   useEffect(() => {
     fetchItems();
   }, [projectId]);
@@ -95,7 +116,7 @@ export default function ProjectAgreementsManager({
     e.preventDefault();
     if (!title.trim()) return showNotification('error', 'El título o descripción es obligatorio');
 
-    const responsibleObj = directoryMembers.find(m => m.id === responsibleMemberId);
+    const responsibleObj = effectiveMembers.find(m => m.id === responsibleMemberId);
 
     setSaving(true);
     const newItem: Partial<AgreementPendingItem> = {
@@ -404,10 +425,10 @@ export default function ProjectAgreementsManager({
                 onChange={e => setResponsibleMemberId(e.target.value)}
                 style={{ width: '100%', height: '40px', borderRadius: '10px', fontSize: '0.85rem', fontWeight: 600 }}
               >
-                <option value="">Seleccionar del Directorio...</option>
-                {directoryMembers.map(m => (
+                <option value="">Seleccionar del Directorio ({effectiveMembers.length} disponibles)...</option>
+                {effectiveMembers.map(m => (
                   <option key={m.id} value={m.id}>
-                    {m.name} ({m.group_type} - {m.role_title})
+                    {m.name} ({m.group_type} - {m.role_title}{m.secondary_role_title ? ` / ${m.secondary_role_title}` : ''})
                   </option>
                 ))}
               </select>

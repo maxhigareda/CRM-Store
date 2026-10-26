@@ -48,6 +48,8 @@ export interface Deliverable {
   project_id?: string;
   name: string;
   description?: string;
+  scope_definition?: string;
+  scope_document_url?: string;
   weight_pct: number;
   status: 'pending' | 'in_progress' | 'review' | 'accepted';
   acceptance_criteria?: string;

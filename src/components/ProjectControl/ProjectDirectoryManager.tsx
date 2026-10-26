@@ -8,9 +8,10 @@ import {
   Globe, 
   X,
   Building2,
-  UserCheck
+  UserCheck,
+  Edit2
 } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { supabase, supabaseSecondary } from '../../lib/supabase';
 import { useNotification } from '../../contexts/NotificationContext';
 
 export interface DirectoryMember {
@@ -21,6 +22,7 @@ export interface DirectoryMember {
   email: string;
   phone?: string;
   role_title: string;
+  secondary_role_title?: string;
   location_country: string;
   created_at?: string;
 }
@@ -54,19 +56,39 @@ export default function ProjectDirectoryManager({
   const [loading, setLoading] = useState(true);
   const [filterGroup, setFilterGroup] = useState<'all' | 'Cliente' | 'Store'>('all');
 
-  // Formulario nuevo miembro
+  // Catálogo de Talent Flow (Store Intelligence)
+  const [storeTalentProfiles, setStoreTalentProfiles] = useState<any[]>([]);
+
+  // Formulario nuevo / edición de miembro
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingMember, setEditingMember] = useState<DirectoryMember | null>(null);
   const [groupType, setGroupType] = useState<'Cliente' | 'Store'>('Store');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [roleTitle, setRoleTitle] = useState('');
+  const [secondaryRoleTitle, setSecondaryRoleTitle] = useState('');
   const [country, setCountry] = useState('México');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchDirectory();
+    fetchStoreTalent();
   }, [projectId]);
+
+  const fetchStoreTalent = async () => {
+    try {
+      const { data } = await supabaseSecondary
+        .from('profiles')
+        .select('id, full_name, email, phone, phone_office, phone_personal, job_title, birth_country, role')
+        .order('full_name');
+      if (data && data.length > 0) {
+        setStoreTalentProfiles(data);
+      }
+    } catch (e) {
+      console.warn('Error loading Talent Flow profiles from secondary supabase:', e);
+    }
+  };
 
   const fetchDirectory = async () => {
     setLoading(true);
@@ -96,59 +118,106 @@ export default function ProjectDirectoryManager({
     }
   };
 
-  const handleAddMember = async (e: React.FormEvent) => {
+  const handleSelectTalentProfile = (profileId: string) => {
+    if (!profileId) return;
+    const p = storeTalentProfiles.find(item => item.id === profileId);
+    if (!p) return;
+    setName(p.full_name || '');
+    setEmail(p.email || '');
+    setPhone(p.phone || p.phone_personal || p.phone_office || '');
+    setRoleTitle(p.job_title || 'Consultor');
+    if (p.birth_country && COUNTRIES.includes(p.birth_country)) {
+      setCountry(p.birth_country);
+    }
+  };
+
+  const handleStartEdit = (member: DirectoryMember) => {
+    setEditingMember(member);
+    setGroupType(member.group_type);
+    setName(member.name);
+    setEmail(member.email);
+    setPhone(member.phone || '');
+    setRoleTitle(member.role_title);
+    setSecondaryRoleTitle(member.secondary_role_title || '');
+    setCountry(member.location_country || 'México');
+    setShowAddForm(true);
+  };
+
+  const handleResetForm = () => {
+    setEditingMember(null);
+    setName('');
+    setEmail('');
+    setPhone('');
+    setRoleTitle('');
+    setSecondaryRoleTitle('');
+    setGroupType('Store');
+    setShowAddForm(false);
+  };
+
+  const handleSaveMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return showNotification('error', 'El nombre es obligatorio');
     if (!email.trim()) return showNotification('error', 'El correo es obligatorio');
-    if (!roleTitle.trim()) return showNotification('error', 'El rol es obligatorio');
+    if (!roleTitle.trim()) return showNotification('error', 'El rol primario es obligatorio');
 
     setSaving(true);
-    const newMember: Partial<DirectoryMember> = {
+    const memberPayload: Partial<DirectoryMember> = {
       project_id: projectId,
       group_type: groupType,
       name: name.trim(),
       email: email.trim().toLowerCase(),
       phone: phone.trim() || undefined,
       role_title: roleTitle.trim(),
+      secondary_role_title: secondaryRoleTitle.trim() || undefined,
       location_country: country
     };
 
     try {
-      const { data, error } = await supabase
-        .from('project_directory_members')
-        .insert([newMember])
-        .select()
-        .single();
+      if (editingMember) {
+        // Modo Edición
+        await supabase
+          .from('project_directory_members')
+          .update(memberPayload)
+          .eq('id', editingMember.id);
 
-      if (error) {
-        // Fallback local
-        const localId = 'dir_' + Date.now();
-        const savedMember: DirectoryMember = {
-          id: localId,
-          project_id: projectId,
-          group_type: groupType,
-          name: name.trim(),
-          email: email.trim().toLowerCase(),
-          phone: phone.trim() || undefined,
-          role_title: roleTitle.trim(),
-          location_country: country,
-          created_at: new Date().toISOString()
-        };
-        const updated = [...members, savedMember];
-        setMembers(updated);
-        localStorage.setItem(`project_dir_${projectId}`, JSON.stringify(updated));
-      } else if (data) {
-        const updated = [...members, data];
-        setMembers(updated);
-        localStorage.setItem(`project_dir_${projectId}`, JSON.stringify(updated));
+        const updatedList = members.map(m => m.id === editingMember.id ? { ...m, ...memberPayload } : m);
+        setMembers(updatedList);
+        localStorage.setItem(`project_dir_${projectId}`, JSON.stringify(updatedList));
+        showNotification('success', `Datos de "${name}" actualizados`);
+      } else {
+        // Modo Creación
+        const { data, error } = await supabase
+          .from('project_directory_members')
+          .insert([memberPayload])
+          .select()
+          .single();
+
+        if (error) {
+          const localId = 'dir_' + Date.now();
+          const savedMember: DirectoryMember = {
+            id: localId,
+            project_id: projectId,
+            group_type: groupType,
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
+            phone: phone.trim() || undefined,
+            role_title: roleTitle.trim(),
+            secondary_role_title: secondaryRoleTitle.trim() || undefined,
+            location_country: country,
+            created_at: new Date().toISOString()
+          };
+          const updated = [...members, savedMember];
+          setMembers(updated);
+          localStorage.setItem(`project_dir_${projectId}`, JSON.stringify(updated));
+        } else if (data) {
+          const updated = [...members, data];
+          setMembers(updated);
+          localStorage.setItem(`project_dir_${projectId}`, JSON.stringify(updated));
+        }
+        showNotification('success', `${name} agregado al Directorio del Proyecto`);
       }
 
-      showNotification('success', `${name} agregado al Directorio del Proyecto`);
-      setName('');
-      setEmail('');
-      setPhone('');
-      setRoleTitle('');
-      setShowAddForm(false);
+      handleResetForm();
       if (onDirectoryUpdated) onDirectoryUpdated();
     } catch (err: any) {
       showNotification('error', 'Error al guardar miembro: ' + err.message);
@@ -265,7 +334,10 @@ export default function ProjectDirectoryManager({
           </div>
 
           <button
-            onClick={() => setShowAddForm(!showAddForm)}
+            onClick={() => {
+              if (showAddForm) handleResetForm();
+              else setShowAddForm(true);
+            }}
             className="btn btn-primary"
             style={{ 
               borderRadius: '10px', 
@@ -274,19 +346,20 @@ export default function ProjectDirectoryManager({
               display: 'flex', 
               alignItems: 'center', 
               gap: '6px',
-              padding: '8px 16px' 
+              padding: '8px 16px',
+              background: '#4f46e5'
             }}
           >
             {showAddForm ? <X size={15} /> : <Plus size={15} />}
-            {showAddForm ? 'Cerrar' : '+ Agregar Persona'}
+            {showAddForm ? 'Cerrar Formulario' : '+ Agregar Persona'}
           </button>
         </div>
       </div>
 
-      {/* Formulario de Alta Rápida en Directorio */}
+      {/* Formulario de Alta y Edición en Directorio */}
       {showAddForm && (
         <form 
-          onSubmit={handleAddMember}
+          onSubmit={handleSaveMember}
           style={{ 
             background: 'white', 
             padding: '24px', 
@@ -295,9 +368,35 @@ export default function ProjectDirectoryManager({
             boxShadow: '0 4px 12px rgba(99, 102, 241, 0.08)' 
           }}
         >
-          <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#1e293b', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <UserCheck size={18} color="#6366f1" /> Nuevo Registro en Directorio
+          <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#1e293b', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {editingMember ? <Edit2 size={18} color="#6366f1" /> : <UserCheck size={18} color="#6366f1" />}
+            <span>{editingMember ? `Editar Miembro: ${editingMember.name}` : 'Nuevo Registro en Directorio del Proyecto'}</span>
           </div>
+
+          {/* Si es posición Store, desplegar catálogo de Talent */}
+          {groupType === 'Store' && (
+            <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '14px 16px', borderRadius: '12px', marginBottom: '18px' }}>
+              <label style={{ fontSize: '0.72rem', fontWeight: 800, color: '#6d28d9', display: 'block', marginBottom: '6px' }}>
+                🏢 SELECCIONAR DEL DIRECTORIO TALENT (STORE INTELLIGENCE)
+              </label>
+              <select
+                className="form-input"
+                onChange={e => handleSelectTalentProfile(e.target.value)}
+                defaultValue=""
+                style={{ width: '100%', height: '40px', borderRadius: '10px', fontSize: '0.85rem', fontWeight: 700, borderColor: '#c4b5fd', background: 'white' }}
+              >
+                <option value="">Buscar y autocompletar desde Talent ({storeTalentProfiles.length} colaboradores)...</option>
+                {storeTalentProfiles.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.full_name} — {p.job_title || 'Store'} ({p.email})
+                  </option>
+                ))}
+              </select>
+              <div style={{ fontSize: '0.72rem', color: '#6d28d9', marginTop: '4px' }}>
+                ⚡ Al seleccionar un colaborador, se llenan automáticamente Nombre, Correo, Teléfono y Rol. Puedes ajustar cualquier campo a continuación.
+              </div>
+            </div>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '20px' }}>
             {/* Grupo */}
@@ -363,18 +462,33 @@ export default function ProjectDirectoryManager({
               />
             </div>
 
-            {/* Rol */}
+            {/* Rol Primario */}
             <div>
               <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '6px' }}>
-                ROL EN EL PROYECTO *
+                ROL EN EL PROYECTO (PRIMARIO) *
               </label>
               <input
                 type="text"
                 required
-                placeholder="Ej: BI Visualization Developer, PM, Sponsor"
+                placeholder="Ej: BI Visualization Developer, PM, Azure Dev..."
                 className="form-input"
                 value={roleTitle}
                 onChange={e => setRoleTitle(e.target.value)}
+                style={{ width: '100%', height: '40px', borderRadius: '10px', fontSize: '0.85rem' }}
+              />
+            </div>
+
+            {/* Segundo Rol (Opcional - soporte para perfiles con dos roles) */}
+            <div>
+              <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#64748b', display: 'block', marginBottom: '6px' }}>
+                SEGUNDO ROL (OPCIONAL)
+              </label>
+              <input
+                type="text"
+                placeholder="Ej: Solution Architect, Scrum Master..."
+                className="form-input"
+                value={secondaryRoleTitle}
+                onChange={e => setSecondaryRoleTitle(e.target.value)}
                 style={{ width: '100%', height: '40px', borderRadius: '10px', fontSize: '0.85rem' }}
               />
             </div>
@@ -400,9 +514,9 @@ export default function ProjectDirectoryManager({
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
             <button
               type="button"
-              onClick={() => setShowAddForm(false)}
+              onClick={handleResetForm}
               className="btn btn-secondary"
-              style={{ borderRadius: '10px', padding: '8px 16px', fontSize: '0.8rem' }}
+              style={{ borderRadius: '10px', padding: '8px 16px', fontSize: '0.85rem' }}
             >
               Cancelar
             </button>
@@ -410,9 +524,9 @@ export default function ProjectDirectoryManager({
               type="submit"
               disabled={saving}
               className="btn btn-primary"
-              style={{ borderRadius: '10px', padding: '8px 20px', fontSize: '0.8rem', fontWeight: 700 }}
+              style={{ borderRadius: '10px', padding: '8px 24px', fontSize: '0.85rem', fontWeight: 700, background: '#4f46e5' }}
             >
-              {saving ? 'Guardando...' : 'Guardar en Directorio'}
+              {saving ? 'Guardando...' : editingMember ? 'Guardar Cambios' : 'Registrar en Directorio'}
             </button>
           </div>
         </form>
@@ -490,16 +604,30 @@ export default function ProjectDirectoryManager({
                     ) : '-'}
                   </td>
                   <td style={{ padding: '14px 18px' }}>
-                    <span style={{ 
-                      fontSize: '0.8rem', 
-                      fontWeight: 700, 
-                      color: '#334155',
-                      background: '#f1f5f9',
-                      padding: '3px 8px',
-                      borderRadius: '6px'
-                    }}>
-                      {member.role_title}
-                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                      <span style={{ 
+                        fontSize: '0.8rem', 
+                        fontWeight: 700, 
+                        color: '#334155',
+                        background: '#f1f5f9',
+                        padding: '3px 8px',
+                        borderRadius: '6px'
+                      }}>
+                        {member.role_title}
+                      </span>
+                      {member.secondary_role_title && (
+                        <span style={{ 
+                          fontSize: '0.7rem', 
+                          fontWeight: 700, 
+                          color: '#6366f1',
+                          background: '#e0e7ff',
+                          padding: '2px 6px',
+                          borderRadius: '4px'
+                        }}>
+                          2do Rol: {member.secondary_role_title}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td style={{ padding: '14px 18px', fontSize: '0.85rem', color: '#475569' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -508,14 +636,24 @@ export default function ProjectDirectoryManager({
                     </div>
                   </td>
                   <td style={{ padding: '14px 18px', textAlign: 'center' }}>
-                    <button
-                      onClick={() => handleDeleteMember(member.id, member.name)}
-                      className="btn btn-secondary"
-                      style={{ padding: '6px 10px', color: '#ef4444', borderRadius: '8px' }}
-                      title="Eliminar del directorio"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                      <button
+                        onClick={() => handleStartEdit(member)}
+                        className="btn btn-secondary"
+                        style={{ padding: '6px 10px', color: '#6366f1', borderRadius: '8px', background: '#f5f3ff', borderColor: '#ddd6fe' }}
+                        title="Editar datos de esta persona"
+                      >
+                        <Edit2 size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteMember(member.id, member.name)}
+                        className="btn btn-secondary"
+                        style={{ padding: '6px 10px', color: '#ef4444', borderRadius: '8px' }}
+                        title="Eliminar del directorio"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))

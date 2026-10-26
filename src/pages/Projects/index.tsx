@@ -20,7 +20,11 @@ import {
   Loader2,
   LayoutGrid,
   List,
-  ArrowRight
+  ArrowRight,
+  ArrowUp,
+  ArrowDown,
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react';
 import GanttChart from '../../components/Gantt/GanttChart';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -49,6 +53,24 @@ interface Project {
 
 const PHASE_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#ef4444', '#06b6d4'];
 
+interface ProjectColumnConfig {
+  id: string;
+  label: string;
+  visible: boolean;
+}
+
+const DEFAULT_PROJECT_COLUMNS: ProjectColumnConfig[] = [
+  { id: 'name', label: 'Nombre', visible: true },
+  { id: 'actions', label: 'Acciones', visible: true },
+  { id: 'client', label: 'Cliente', visible: true },
+  { id: 'proposal', label: 'Propuesta', visible: true },
+  { id: 'status', label: 'Estado', visible: true },
+  { id: 'priority', label: 'Prioridad', visible: true },
+  { id: 'duration', label: 'Semanas', visible: true },
+  { id: 'kickoff', label: 'Kick off', visible: true },
+  { id: 'end', label: 'Finalización', visible: true },
+];
+
 export default function Projects() {
   const { showNotification } = useNotification();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -58,9 +80,66 @@ export default function Projects() {
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showCommercialModal, setShowCommercialModal] = useState(false);
+  const [editingCommercialProject, setEditingCommercialProject] = useState<any | null>(null);
   const [showPhaseEditor, setShowPhaseEditor] = useState(false);
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Columnas personalizables y reordenables
+  const [tableColumns, setTableColumns] = useState<ProjectColumnConfig[]>(() => {
+    try {
+      const saved = localStorage.getItem('project_table_columns_config');
+      if (saved) {
+        const parsed: ProjectColumnConfig[] = JSON.parse(saved);
+        // Asegurar que todas las columnas por defecto existen
+        const ids = new Set(parsed.map(p => p.id));
+        const missing = DEFAULT_PROJECT_COLUMNS.filter(d => !ids.has(d.id));
+        return [...parsed, ...missing];
+      }
+    } catch (e) {
+      console.warn('Error reading columns config:', e);
+    }
+    return DEFAULT_PROJECT_COLUMNS;
+  });
+  const [showColumnsModal, setShowColumnsModal] = useState(false);
+
+  const saveColumnsConfig = (newCols: ProjectColumnConfig[]) => {
+    setTableColumns(newCols);
+    try {
+      localStorage.setItem('project_table_columns_config', JSON.stringify(newCols));
+    } catch (e) {
+      console.warn(e);
+    }
+  };
+
+  const handleMoveColumn = (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= tableColumns.length) return;
+    const updated = [...tableColumns];
+    const [moved] = updated.splice(index, 1);
+    updated.splice(targetIndex, 0, moved);
+    saveColumnsConfig(updated);
+  };
+
+  const handleToggleColumn = (id: string) => {
+    const updated = tableColumns.map(col => col.id === id ? { ...col, visible: !col.visible } : col);
+    saveColumnsConfig(updated);
+  };
+
+  const handleResetColumns = () => {
+    saveColumnsConfig(DEFAULT_PROJECT_COLUMNS);
+    showNotification('info', 'Columnas restablecidas al orden predeterminado');
+  };
+
+  // Helper para verificar configuración inicial incompleta
+  const isProjectIncomplete = (p: any) => {
+    return !p.proposal_url || !p.quoted_budget || Number(p.quoted_budget) <= 0;
+  };
+
+  const handleEditCommercial = (project: any) => {
+    setEditingCommercialProject(project);
+    setShowCommercialModal(true);
+  };
   
   // Form State
   const [name, setName] = useState('');
@@ -422,7 +501,7 @@ export default function Projects() {
             </button>
           )}
 
-          {/* Selector de Vistas: Tabla vs Tarjetas */}
+          {/* Selector de Vistas: Tabla vs Tarjetas y Botón de Columnas */}
           <div style={{ display: 'flex', background: '#f1f5f9', padding: '3px', borderRadius: '10px', gap: '2px', marginLeft: '6px' }}>
             <button
               onClick={() => setViewMode('table')}
@@ -465,6 +544,16 @@ export default function Projects() {
               <LayoutGrid size={15} /> Tarjetas
             </button>
           </div>
+
+          {/* Botón Personalizar Columnas */}
+          <button
+            onClick={() => setShowColumnsModal(true)}
+            className="btn btn-secondary"
+            style={{ padding: '6px 12px', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '8px', background: 'white' }}
+            title="Personalizar orden y visibilidad de columnas"
+          >
+            <Settings2 size={15} /> Columnas
+          </button>
         </div>
       </div>
 
@@ -473,21 +562,17 @@ export default function Projects() {
           <table className="table">
             <thead>
               <tr>
-                <th>Nombre</th>
-                <th style={{ textAlign: 'center' }}>Acciones</th>
-                <th>Cliente</th>
-                <th>Propuesta</th>
-                <th>Estado</th>
-                <th>Prioridad</th>
-                <th>Semanas</th>
-                <th>Kick off</th>
-                <th>Finalización</th>
+                {tableColumns.filter(c => c.visible).map(col => (
+                  <th key={col.id} style={{ textAlign: col.id === 'actions' || col.id === 'proposal' || col.id === 'duration' ? 'center' : 'left' }}>
+                    {col.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9} style={{ padding: '24px' }}>
+                  <td colSpan={tableColumns.filter(c => c.visible).length || 9} style={{ padding: '24px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
                       <Loader2 className="animate-spin" size={18} />
                       <span>Cargando proyectos...</span>
@@ -496,7 +581,7 @@ export default function Projects() {
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={9} style={{ padding: '32px', textAlign: 'center' }}>
+                  <td colSpan={tableColumns.filter(c => c.visible).length || 9} style={{ padding: '32px', textAlign: 'center' }}>
                     <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '12px' }}>
                       ⚠️ {error}
                     </div>
@@ -510,56 +595,124 @@ export default function Projects() {
                   </td>
                 </tr>
               ) : filteredProjects.length === 0 ? (
-                <tr><td colSpan={9} style={{ textAlign: 'center' }}>No se encontraron proyectos.</td></tr>
+                <tr><td colSpan={tableColumns.filter(c => c.visible).length || 9} style={{ textAlign: 'center' }}>No se encontraron proyectos.</td></tr>
               ) : filteredProjects.map(p => {
                 const projectTags = allTags.filter(t => (p.tag_ids || []).includes(t.id));
                 const statusInfo = getStatusDisplay(p);
-                
+                const incomplete = isProjectIncomplete(p);
+                const visibleCols = tableColumns.filter(c => c.visible);
+
                 return (
                   <tr key={p.id}>
-                    <td>
-                      <Link to={`/board/${p.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                        <div style={{ fontWeight: 600, color: '#6366f1' }}>{p.name}</div>
-                      </Link>
-                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
-                        {projectTags.map((tag) => (
-                          <span key={tag.id} className="status-chip" style={{ backgroundColor: `${tag.color}15`, color: tag.color, padding: '2px 8px', fontSize: '10px' }}>
-                            #{tag.name}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <button className="btn btn-secondary" style={{ padding: '6px' }} onClick={() => handleOpenModal(p)} title="Editar Proyecto">
-                        <Edit2 size={14} />
-                      </button>
-                    </td>
-                    <td>{p.clients?.reference_name || p.clients?.name || 'Sin asignar'}</td>
-                    <td style={{ textAlign: 'center' }}>
-                      {p.proposal_url ? (
-                        <a href={p.proposal_url} target="_blank" rel="noopener noreferrer" title="Ver Propuesta" style={{ color: 'var(--primary-color)' }}>
-                          <FileText size={18} />
-                        </a>
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>-</span>
-                      )}
-                    </td>
-                    <td>
-                      <span className={`status-chip ${statusInfo.class}`}>
-                        {statusInfo.label}
-                      </span>
-                    </td>
-                    <td>
-                      <span className="status-chip" style={{ 
-                        backgroundColor: p.priority === 'urgent' ? '#fee2e2' : p.priority === 'high' ? '#ffedd5' : p.priority === 'low' ? '#dcfce7' : '#f1f5f9',
-                        color: p.priority === 'urgent' ? '#991b1b' : p.priority === 'high' ? '#c2410c' : p.priority === 'low' ? '#166534' : '#475569'
-                      }}>
-                        {p.priority === 'urgent' ? '🔴 Urgente' : p.priority === 'high' ? '🟠 Alta' : p.priority === 'low' ? '🟢 Baja' : '🟡 Media'}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>{p.duration_weeks}</td>
-                    <td>{p.delivery_date ? new Date(p.delivery_date + 'T12:00:00').toLocaleDateString() : '-'}</td>
-                    <td style={{ fontWeight: 500 }}>{p.end_date ? new Date(p.end_date + 'T12:00:00').toLocaleDateString() : '-'}</td>
+                    {visibleCols.map(col => {
+                      if (col.id === 'name') {
+                        return (
+                          <td key={col.id}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <Link to={`/board/${p.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+                                <div style={{ fontWeight: 700, color: '#4f46e5' }}>{p.name}</div>
+                              </Link>
+                              {incomplete && (
+                                <span 
+                                  onClick={(e) => { e.preventDefault(); handleEditCommercial(p); }}
+                                  title="Configuración inicial incompleta: falta link de cotización o presupuesto. Haz clic para completar."
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    background: '#fff1f2',
+                                    color: '#e11d48',
+                                    border: '1px solid #fecdd3',
+                                    borderRadius: '6px',
+                                    padding: '2px 7px',
+                                    fontSize: '0.68rem',
+                                    fontWeight: 800,
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  <AlertTriangle size={11} /> Incompleto
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                              {projectTags.map((tag) => (
+                                <span key={tag.id} className="status-chip" style={{ backgroundColor: `${tag.color}15`, color: tag.color, padding: '2px 8px', fontSize: '10px' }}>
+                                  #{tag.name}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        );
+                      }
+                      if (col.id === 'actions') {
+                        return (
+                          <td key={col.id} style={{ textAlign: 'center' }}>
+                            <button 
+                              className="btn btn-secondary" 
+                              style={{ padding: '6px 8px', borderRadius: '8px', background: '#f5f3ff', borderColor: '#ddd6fe', color: '#6d28d9' }} 
+                              onClick={() => handleEditCommercial(p)} 
+                              title="Editar Configuración Inicial y Comercial (Cotización, Presupuesto, etc.)"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                          </td>
+                        );
+                      }
+                      if (col.id === 'client') {
+                        return <td key={col.id}>{p.clients?.reference_name || p.clients?.name || 'Sin asignar'}</td>;
+                      }
+                      if (col.id === 'proposal') {
+                        return (
+                          <td key={col.id} style={{ textAlign: 'center' }}>
+                            {p.proposal_url ? (
+                              <a href={p.proposal_url} target="_blank" rel="noopener noreferrer" title="Ver Propuesta" style={{ color: 'var(--primary-color)' }}>
+                                <FileText size={18} />
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleEditCommercial(p)}
+                                style={{ border: 'none', background: '#fff1f2', color: '#e11d48', fontSize: '11px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px', cursor: 'pointer' }}
+                                title="Agregar cotización / propuesta"
+                              >
+                                + Cotización
+                              </button>
+                            )}
+                          </td>
+                        );
+                      }
+                      if (col.id === 'status') {
+                        return (
+                          <td key={col.id}>
+                            <span className={`status-chip ${statusInfo.class}`}>
+                              {statusInfo.label}
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (col.id === 'priority') {
+                        return (
+                          <td key={col.id}>
+                            <span className="status-chip" style={{ 
+                              backgroundColor: p.priority === 'urgent' ? '#fee2e2' : p.priority === 'high' ? '#ffedd5' : p.priority === 'low' ? '#dcfce7' : '#f1f5f9',
+                              color: p.priority === 'urgent' ? '#991b1b' : p.priority === 'high' ? '#c2410c' : p.priority === 'low' ? '#166534' : '#475569'
+                            }}>
+                              {p.priority === 'urgent' ? '🔴 Urgente' : p.priority === 'high' ? '🟠 Alta' : p.priority === 'low' ? '🟢 Baja' : '🟡 Media'}
+                            </span>
+                          </td>
+                        );
+                      }
+                      if (col.id === 'duration') {
+                        return <td key={col.id} style={{ textAlign: 'center', fontWeight: 700 }}>{p.duration_weeks} sem</td>;
+                      }
+                      if (col.id === 'kickoff') {
+                        return <td key={col.id}>{p.delivery_date ? new Date(p.delivery_date + 'T12:00:00').toLocaleDateString() : '-'}</td>;
+                      }
+                      if (col.id === 'end') {
+                        return <td key={col.id} style={{ fontWeight: 600 }}>{p.end_date ? new Date(p.end_date + 'T12:00:00').toLocaleDateString() : '-'}</td>;
+                      }
+                      return <td key={col.id}>-</td>;
+                    })}
                   </tr>
                 );
               })}
@@ -582,6 +735,7 @@ export default function Projects() {
             filteredProjects.map(p => {
               const projectTags = allTags.filter(t => (p.tag_ids || []).includes(t.id));
               const statusInfo = getStatusDisplay(p);
+              const incomplete = isProjectIncomplete(p);
 
               return (
                 <div 
@@ -599,19 +753,42 @@ export default function Projects() {
                   }}
                 >
                   <div>
-                    {/* Header de la Tarjeta: Cliente + Botón Editar */}
+                    {/* Header de la Tarjeta: Cliente + Alerta Incompleto + Botón Editar */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                       <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--primary-color)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                         {p.clients?.reference_name || p.clients?.name || 'Sin asignar'}
                       </span>
-                      <button 
-                        className="btn btn-secondary" 
-                        style={{ padding: '4px 8px', borderRadius: '6px' }} 
-                        onClick={() => handleOpenModal(p)} 
-                        title="Editar Proyecto"
-                      >
-                        <Edit2 size={13} />
-                      </button>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        {incomplete && (
+                          <span 
+                            onClick={() => handleEditCommercial(p)}
+                            title="Configuración inicial incompleta. Clic para editar."
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              background: '#fff1f2',
+                              color: '#e11d48',
+                              border: '1px solid #fecdd3',
+                              borderRadius: '6px',
+                              padding: '2px 6px',
+                              fontSize: '0.65rem',
+                              fontWeight: 800,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <AlertTriangle size={10} /> Incompleto
+                          </span>
+                        )}
+                        <button 
+                          className="btn btn-secondary" 
+                          style={{ padding: '4px 8px', borderRadius: '6px', background: '#f5f3ff', borderColor: '#ddd6fe', color: '#6d28d9' }} 
+                          onClick={() => handleEditCommercial(p)} 
+                          title="Editar Configuración Inicial y Comercial"
+                        >
+                          <Edit2 size={13} />
+                        </button>
+                      </div>
                     </div>
 
                     {/* Nombre del Proyecto */}
@@ -1075,12 +1252,131 @@ export default function Projects() {
         </div>
       )}
 
-      {/* Modal de Alta Comercial con PO y Margen Automático */}
+      {/* Modal de Personalización de Columnas */}
+      {showColumnsModal && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }}>
+          <div className="modal-content" style={{ maxWidth: '480px', borderRadius: '20px' }}>
+            <div className="modal-header" style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ background: '#f5f3ff', color: '#7c3aed', padding: '10px', borderRadius: '12px' }}>
+                  <Settings2 size={22} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>Personalizar Columnas</h3>
+                  <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Reordena y activa/desactiva columnas de la tabla</div>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                className="modal-close" 
+                onClick={() => setShowColumnsModal(false)}
+                style={{ background: '#f1f5f9', border: 'none', borderRadius: '10px', padding: '8px', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: '20px 0', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '380px', overflowY: 'auto' }}>
+              {tableColumns.map((col, idx) => (
+                <div 
+                  key={col.id} 
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 14px',
+                    background: col.visible ? '#f8fafc' : '#f1f5f9',
+                    borderRadius: '12px',
+                    border: `1px solid ${col.visible ? '#e2e8f0' : '#cbd5e1'}`,
+                    opacity: col.visible ? 1 : 0.6
+                  }}
+                >
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', margin: 0, fontWeight: 700, fontSize: '0.9rem', color: '#1e293b' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={col.visible} 
+                      onChange={() => handleToggleColumn(col.id)} 
+                      style={{ width: '16px', height: '16px', accentColor: '#7c3aed', cursor: 'pointer' }}
+                    />
+                    <span>{col.label}</span>
+                  </label>
+
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() => handleMoveColumn(idx, 'up')}
+                      style={{
+                        background: idx === 0 ? 'transparent' : 'white',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '6px',
+                        padding: '4px 6px',
+                        cursor: idx === 0 ? 'not-allowed' : 'pointer',
+                        color: idx === 0 ? '#cbd5e1' : '#475569'
+                      }}
+                      title="Mover arriba"
+                    >
+                      <ArrowUp size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === tableColumns.length - 1}
+                      onClick={() => handleMoveColumn(idx, 'down')}
+                      style={{
+                        background: idx === tableColumns.length - 1 ? 'transparent' : 'white',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '6px',
+                        padding: '4px 6px',
+                        cursor: idx === tableColumns.length - 1 ? 'not-allowed' : 'pointer',
+                        color: idx === tableColumns.length - 1 ? '#cbd5e1' : '#475569'
+                      }}
+                      title="Mover abajo"
+                    >
+                      <ArrowDown size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleResetColumns}
+                style={{ fontSize: '0.8rem', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <RotateCcw size={14} /> Predeterminado
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => setShowColumnsModal(false)}
+                style={{ padding: '8px 20px', borderRadius: '10px', background: '#7c3aed', borderColor: '#6d28d9' }}
+              >
+                Listo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Alta y Edición Comercial con PO y Margen Automático */}
       <CreateProjectCommercialModal
         isOpen={showCommercialModal}
-        onClose={() => setShowCommercialModal(false)}
-        onProjectCreated={(newProject) => {
-          setProjects(prev => [newProject, ...prev]);
+        editingProject={editingCommercialProject}
+        onClose={() => {
+          setShowCommercialModal(false);
+          setEditingCommercialProject(null);
+        }}
+        onProjectCreated={(updatedProject) => {
+          setProjects(prev => {
+            const exists = prev.some(p => p.id === updatedProject.id);
+            if (exists) {
+              return prev.map(p => p.id === updatedProject.id ? { ...p, ...updatedProject } : p);
+            }
+            return [updatedProject, ...prev];
+          });
         }}
       />
     </div>
