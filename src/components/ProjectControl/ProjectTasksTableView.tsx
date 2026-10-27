@@ -140,6 +140,20 @@ export default function ProjectTasksTableView({
   // Miembros resueltos con fallback garantizado a localStorage
   const [effectiveMembers, setEffectiveMembers] = useState<DirectoryMember[]>(directoryMembers);
 
+  // Respaldo y sincronización de atributos extendidos de tareas (auto_status, progress_pct, has_risk)
+  const [tasksExtra, setTasksExtra] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(`project_tasks_extra_${projectId}`);
+      if (cached) {
+        setTasksExtra(JSON.parse(cached));
+      }
+    } catch (e) {
+      console.warn('Error reading tasks extra cache:', e);
+    }
+  }, [projectId, tasks]);
+
   useEffect(() => {
     if (directoryMembers && directoryMembers.length > 0) {
       setEffectiveMembers(directoryMembers);
@@ -216,15 +230,39 @@ export default function ProjectTasksTableView({
     const autoStatus = computeAutoStatus(start, end, clamped);
     const newKanbanStatus = clamped >= 100 ? 'done' : clamped > 0 ? 'doing' : 'todo';
 
+    const updatePayload: Record<string, any> = { 
+      progress_pct: clamped,
+      auto_status: autoStatus,
+      status: newKanbanStatus 
+    };
+
     try {
-      await supabase
-        .from('tasks')
-        .update({ 
-          progress_pct: clamped,
-          auto_status: autoStatus,
-          status: newKanbanStatus 
-        })
-        .eq('id', taskId);
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const { error } = await supabase
+          .from('tasks')
+          .update(updatePayload)
+          .eq('id', taskId);
+
+        if (!error) break;
+
+        const missingColMatch = error.message.match(/Could not find the '([^']+)' column/i) ||
+                                error.message.match(/column "?([^"\s]+)"? of relation "?tasks"? does not exist/i);
+        if (missingColMatch && missingColMatch[1] && missingColMatch[1] in updatePayload) {
+          delete updatePayload[missingColMatch[1]];
+          continue;
+        }
+        break;
+      }
+
+      // Respaldo local de atributos de progreso
+      try {
+        const cachedRaw = localStorage.getItem(`project_tasks_extra_${projectId}`) || '{}';
+        const cached = JSON.parse(cachedRaw);
+        cached[taskId] = { progress_pct: clamped, auto_status: autoStatus };
+        localStorage.setItem(`project_tasks_extra_${projectId}`, JSON.stringify(cached));
+      } catch (e) {
+        console.warn(e);
+      }
 
       onTasksUpdated();
     } catch (err: any) {
@@ -234,7 +272,7 @@ export default function ProjectTasksTableView({
 
   // Manejador del checkbox de Riesgo
   const handleToggleRisk = async (task: TaskItem) => {
-    const nextRisk = !task.has_risk;
+    const nextRisk = !(task.has_risk ?? tasksExtra[task.id]?.has_risk ?? false);
     try {
       let riskId = task.risk_id;
 
@@ -261,13 +299,38 @@ export default function ProjectTasksTableView({
         showNotification('info', 'Bandera de riesgo desactivada');
       }
 
-      await supabase
-        .from('tasks')
-        .update({ 
-          has_risk: nextRisk,
-          risk_id: riskId || null 
-        })
-        .eq('id', task.id);
+      // Actualización resiliente en BD
+      const riskPayload: Record<string, any> = { 
+        has_risk: nextRisk,
+        risk_id: riskId || null 
+      };
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { error } = await supabase
+          .from('tasks')
+          .update(riskPayload)
+          .eq('id', task.id);
+
+        if (!error) break;
+        const missingColMatch = error.message?.match(/Could not find the '([^']+)' column/i) ||
+                                error.message?.match(/column "?([^"\s]+)"? of relation "?tasks"? does not exist/i);
+        if (missingColMatch && missingColMatch[1] && missingColMatch[1] in riskPayload) {
+          delete riskPayload[missingColMatch[1]];
+          continue;
+        }
+        break;
+      }
+
+      // Respaldo local
+      try {
+        const cachedRaw = localStorage.getItem(`project_tasks_extra_${projectId}`) || '{}';
+        const cached = JSON.parse(cachedRaw);
+        cached[task.id] = { ...(cached[task.id] || {}), has_risk: nextRisk, risk_id: riskId || null };
+        localStorage.setItem(`project_tasks_extra_${projectId}`, JSON.stringify(cached));
+        setTasksExtra(cached);
+      } catch (e) {
+        console.warn(e);
+      }
 
       onTasksUpdated();
     } catch (err: any) {
@@ -275,7 +338,7 @@ export default function ProjectTasksTableView({
     }
   };
 
-  // Crear nueva tarea desde la tabla
+  // Crear nueva tarea desde la tabla (Resiliente a columnas aún no cacheadas en Supabase)
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return showNotification('error', 'La descripción de la tarea es obligatoria');
@@ -287,26 +350,61 @@ export default function ProjectTasksTableView({
     const isOutOfScope = newRole && committedRoles.length > 0 && !committedRoles.some(r => r.toLowerCase().includes(newRole.toLowerCase()) || newRole.toLowerCase().includes(r.toLowerCase()));
 
     try {
-      const { data: insertedTask, error } = await supabase
-        .from('tasks')
-        .insert([{
-          project_id: projectId,
-          title: newTitle.trim(),
-          deliverable_id: newDeliverableId || null,
-          start_date: newStartDate || null,
-          due_date: newEndDate || null,
-          required_role: newRole || null,
-          directory_member_id: newMemberId || null,
-          progress_pct: 0,
-          auto_status: autoStatus,
-          status: 'todo',
-          priority: 'medium',
-          estimated_hours: workingDays * 8
-        }])
-        .select()
-        .single();
+      const currentPayload: Record<string, any> = {
+        project_id: projectId,
+        title: newTitle.trim(),
+        deliverable_id: newDeliverableId || null,
+        start_date: newStartDate || null,
+        due_date: newEndDate || null,
+        required_role: newRole || null,
+        directory_member_id: newMemberId || null,
+        progress_pct: 0,
+        auto_status: autoStatus,
+        status: 'todo',
+        priority: 'medium',
+        estimated_hours: workingDays * 8
+      };
 
-      if (error) throw error;
+      let insertedTask: any = null;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const { data, error } = await supabase
+          .from('tasks')
+          .insert([currentPayload])
+          .select()
+          .single();
+
+        if (!error) {
+          insertedTask = data;
+          break;
+        }
+
+        const missingColMatch = error.message?.match(/Could not find the '([^']+)' column/i) ||
+                                error.message?.match(/column "?([^"\s]+)"? of relation "?tasks"? does not exist/i);
+        if (missingColMatch && missingColMatch[1] && missingColMatch[1] in currentPayload) {
+          delete currentPayload[missingColMatch[1]];
+          continue;
+        }
+        throw error;
+      }
+
+      // Guardar respaldo local de atributos de control PM
+      if (insertedTask?.id) {
+        try {
+          const cachedRaw = localStorage.getItem(`project_tasks_extra_${projectId}`) || '{}';
+          const cached = JSON.parse(cachedRaw);
+          cached[insertedTask.id] = {
+            progress_pct: 0,
+            auto_status: autoStatus,
+            has_risk: newHasRisk,
+            required_role: newRole || null,
+            directory_member_id: newMemberId || null
+          };
+          localStorage.setItem(`project_tasks_extra_${projectId}`, JSON.stringify(cached));
+          setTasksExtra(cached);
+        } catch (e) {
+          console.warn(e);
+        }
+      }
 
       if (newHasRisk && insertedTask) {
         // Crear riesgo automático
@@ -324,7 +422,11 @@ export default function ProjectTasksTableView({
           .single();
 
         if (newRisk) {
-          await supabase.from('tasks').update({ has_risk: true, risk_id: newRisk.id }).eq('id', insertedTask.id);
+          try {
+            await supabase.from('tasks').update({ has_risk: true, risk_id: newRisk.id }).eq('id', insertedTask.id);
+          } catch (e) {
+            console.warn(e);
+          }
         }
       }
 
@@ -647,16 +749,21 @@ export default function ProjectTasksTableView({
               </tr>
             ) : (
               tasks.map(task => {
+                const extra = tasksExtra[task.id] || {};
+                const progressPct = task.progress_pct ?? extra.progress_pct ?? 0;
+                const taskRole = task.required_role ?? extra.required_role;
+                const memberId = task.directory_member_id ?? extra.directory_member_id;
+                const hasRisk = task.has_risk ?? extra.has_risk ?? false;
                 const deliverableObj = deliverables.find(d => d.id === task.deliverable_id);
                 const workingDays = calculateWorkingDays(task.start_date, task.due_date);
-                const remaining = calculateRemainingTime(task.due_date, task.progress_pct || 0);
-                const autoStatus = computeAutoStatus(task.start_date, task.due_date, task.progress_pct || 0, task.is_blocked);
+                const remaining = calculateRemainingTime(task.due_date, progressPct);
+                const autoStatus = task.auto_status || extra.auto_status || computeAutoStatus(task.start_date, task.due_date, progressPct, task.is_blocked);
                 const badge = getStatusBadge(autoStatus);
 
                 // Miembros filtrados por el rol de la tarea
                 const matchingMembers = effectiveMembers.filter(m => {
-                  if (!task.required_role) return true;
-                  const r = task.required_role.toLowerCase();
+                  if (!taskRole) return true;
+                  const r = taskRole.toLowerCase();
                   return (m.role_title && (m.role_title.toLowerCase() === r || m.role_title.toLowerCase().includes(r) || r.includes(m.role_title.toLowerCase()))) ||
                          (m.secondary_role_title && (m.secondary_role_title.toLowerCase() === r || m.secondary_role_title.toLowerCase().includes(r) || r.includes(m.secondary_role_title.toLowerCase())));
                 });
@@ -724,7 +831,7 @@ export default function ProjectTasksTableView({
                           type="number"
                           min={0}
                           max={100}
-                          value={task.progress_pct ?? 0}
+                          value={progressPct}
                           onChange={e => handleProgressChange(task.id, Number(e.target.value), task.start_date, task.due_date)}
                           style={{
                             width: '55px',
@@ -759,7 +866,7 @@ export default function ProjectTasksTableView({
                     {/* 9. Rol (Desplegable) */}
                     <td style={{ padding: '12px 14px' }}>
                       <select
-                        value={task.required_role || ''}
+                        value={taskRole || ''}
                         onChange={e => handleRoleChange(task.id, e.target.value)}
                         style={{
                           height: '30px',
@@ -781,10 +888,23 @@ export default function ProjectTasksTableView({
                     {/* 10. Responsable (Filtrado por Rol del Directorio con opción de ver todos) */}
                     <td style={{ padding: '12px 14px' }}>
                       <select
-                        value={task.directory_member_id || ''}
+                        value={memberId || ''}
                         onChange={async (e) => {
                           const mId = e.target.value;
-                          await supabase.from('tasks').update({ directory_member_id: mId || null }).eq('id', task.id);
+                          try {
+                            await supabase.from('tasks').update({ directory_member_id: mId || null }).eq('id', task.id);
+                          } catch (err) {
+                            console.warn(err);
+                          }
+                          try {
+                            const cachedRaw = localStorage.getItem(`project_tasks_extra_${projectId}`) || '{}';
+                            const cached = JSON.parse(cachedRaw);
+                            cached[task.id] = { ...(cached[task.id] || {}), directory_member_id: mId || null };
+                            localStorage.setItem(`project_tasks_extra_${projectId}`, JSON.stringify(cached));
+                            setTasksExtra(cached);
+                          } catch (err) {
+                            console.warn(err);
+                          }
                           onTasksUpdated();
                         }}
                         style={{
@@ -804,7 +924,7 @@ export default function ProjectTasksTableView({
                             ))}
                           </optgroup>
                         )}
-                        {task.required_role && otherMembers.length > 0 && (
+                        {taskRole && otherMembers.length > 0 && (
                           <optgroup label="👥 Otros del Directorio">
                             {otherMembers.map(m => (
                               <option key={m.id} value={m.id}>{m.name} ({m.group_type} - {m.role_title})</option>
@@ -818,7 +938,7 @@ export default function ProjectTasksTableView({
                     <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                       <input
                         type="checkbox"
-                        checked={!!task.has_risk}
+                        checked={!!hasRisk}
                         onChange={() => handleToggleRisk(task)}
                         title="Marcar riesgo (crea automáticamente entrada en Matriz de Riesgos)"
                         style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#dc2626' }}

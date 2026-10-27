@@ -59,6 +59,7 @@ import SustainHandoffManager from '../../components/ProjectControl/SustainHandof
 import ChangeRequestsManager from '../../components/ProjectControl/ChangeRequestsManager';
 import ProjectDocumentsView from '../../components/ProjectControl/ProjectDocumentsView';
 import CreateProjectCommercialModal from '../../components/Modals/CreateProjectCommercialModal';
+import EditProjectPhasesModal from '../../components/Modals/EditProjectPhasesModal';
 import ProjectDirectoryManager from '../../components/ProjectControl/ProjectDirectoryManager';
 import type { DirectoryMember } from '../../components/ProjectControl/ProjectDirectoryManager';
 import ProjectAgreementsManager from '../../components/ProjectControl/ProjectAgreementsManager';
@@ -144,6 +145,7 @@ export default function Board() {
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [showGanttModal, setShowGanttModal] = useState(false);
   const [showCommercialEditModal, setShowCommercialEditModal] = useState(false);
+  const [showEditPhasesModal, setShowEditPhasesModal] = useState(false);
   const [showDeleteProjectConfirm, setShowDeleteProjectConfirm] = useState(false);
   const [deletingProject, setDeletingProject] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -908,11 +910,31 @@ export default function Board() {
         )}
 
         {viewMode === 'gantt' && (
-          <GanttView 
-            tasks={displayedTasks} 
-            project={project}
-            onEditTask={handleEditTask}
-          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ background: 'white', padding: '16px 20px', borderRadius: '14px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>
+                  Cronograma y Etapas del Proyecto
+                </h3>
+                <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: '#64748b' }}>
+                  {project?.project_phases?.length || 0} etapas configuradas — Vinculadas con los Entregables (Paso 2).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditPhasesModal(true)}
+                className="btn btn-secondary"
+                style={{ fontSize: '0.8rem', fontWeight: 700, borderRadius: '8px', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px', background: '#f5f3ff', color: '#6d28d9', borderColor: '#ddd6fe' }}
+              >
+                ✏️ Modificar Etapas / Sincronizar con Entregables
+              </button>
+            </div>
+            <GanttView 
+              tasks={displayedTasks} 
+              project={project}
+              onEditTask={handleEditTask}
+            />
+          </div>
         )}
 
         {viewMode === 'deliverables' && (
@@ -1037,9 +1059,24 @@ export default function Board() {
       {showGanttModal && (
         <div className="modal-overlay">
           <div className="modal-content wide" style={{ padding: '32px' }}>
-             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-               <h2 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Cronograma del Proyecto</h2>
-               <button className="modal-close" onClick={() => setShowGanttModal(false)}><X size={24} /></button>
+             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+               <div>
+                 <h2 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0 }}>Cronograma del Proyecto</h2>
+                 <p style={{ margin: '4px 0 0', fontSize: '0.85rem', color: '#64748b' }}>
+                   Visualización Gantt de etapas y avance real vinculadas con los Entregables.
+                 </p>
+               </div>
+               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                 <button
+                   type="button"
+                   onClick={() => setShowEditPhasesModal(true)}
+                   className="btn btn-secondary"
+                   style={{ fontSize: '0.8rem', fontWeight: 700, borderRadius: '8px', padding: '7px 14px', display: 'flex', alignItems: 'center', gap: '6px', background: '#f5f3ff', color: '#6d28d9', borderColor: '#ddd6fe' }}
+                 >
+                   ✏️ Modificar Etapas ({project?.project_phases?.length || 0})
+                 </button>
+                 <button className="modal-close" onClick={() => setShowGanttModal(false)}><X size={24} /></button>
+               </div>
              </div>
              {(() => {
                // Calculate phase progress based on task statuses
@@ -1084,6 +1121,18 @@ export default function Board() {
         }}
         onProjectDeleted={() => {
           navigate('/projects');
+        }}
+      />
+
+      {/* Modal de Modificación y Sincronización de Etapas */}
+      <EditProjectPhasesModal
+        isOpen={showEditPhasesModal}
+        onClose={() => setShowEditPhasesModal(false)}
+        projectId={projectId!}
+        currentPhases={project?.project_phases || []}
+        deliverables={deliverables}
+        onPhasesUpdated={() => {
+          fetchBoardData();
         }}
       />
 

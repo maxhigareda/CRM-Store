@@ -7,7 +7,8 @@ import {
   Layers, 
   AlertCircle,
   Edit2,
-  ExternalLink
+  ExternalLink,
+  RefreshCw
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -168,6 +169,49 @@ export default function DeliverablesManager({
     }
   };
 
+  // Sincronizar automáticamente las Etapas del Cronograma (Gantt) desde los Entregables
+  const handleSyncPhasesWithDeliverables = async () => {
+    if (deliverables.length === 0) {
+      return showNotification('error', 'Agrega al menos un entregable para sincronizar las etapas');
+    }
+    setSaving(true);
+    try {
+      await supabase.from('project_phases').delete().eq('project_id', projectId);
+
+      const phasesPayload = deliverables.map((d, idx) => {
+        let weeks = 2;
+        if (d.baseline_start_date && d.baseline_end_date) {
+          const start = new Date(d.baseline_start_date + 'T00:00:00');
+          const end = new Date(d.baseline_end_date + 'T00:00:00');
+          if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end >= start) {
+            const diffDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+            weeks = Math.max(1, Math.round(diffDays / 7));
+          }
+        }
+        return {
+          project_id: projectId,
+          name: d.name,
+          duration_weeks: weeks,
+          order_index: idx
+        };
+      });
+
+      const { error } = await supabase.from('project_phases').insert(phasesPayload);
+      if (error) throw error;
+
+      const totalWeeks = phasesPayload.reduce((acc, curr) => acc + curr.duration_weeks, 0);
+      await supabase.from('projects').update({ duration_weeks: totalWeeks }).eq('id', projectId);
+
+      showNotification('success', `⚡ ${phasesPayload.length} Etapas del cronograma sincronizadas a partir de los Entregables`);
+      onDeliverablesUpdated();
+    } catch (err: any) {
+      console.error(err);
+      showNotification('error', 'Error al sincronizar etapas: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       {/* Header y Control de Peso */}
@@ -214,13 +258,37 @@ export default function DeliverablesManager({
           </div>
 
           {canEdit && (
-            <button
-              onClick={handleOpenAdd}
-              className="btn btn-primary"
-              style={{ background: '#7c3aed', borderColor: '#6d28d9', fontSize: '0.825rem', display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              <Plus size={15} /> Nuevo Entregable
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {deliverables.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleSyncPhasesWithDeliverables}
+                  disabled={saving}
+                  className="btn btn-secondary"
+                  style={{ 
+                    background: '#f5f3ff', 
+                    color: '#6d28d9', 
+                    borderColor: '#ddd6fe', 
+                    fontSize: '0.8rem', 
+                    fontWeight: 700, 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '6px',
+                    borderRadius: '8px' 
+                  }}
+                  title="Genera y sincroniza automáticamente las etapas del cronograma Gantt a partir de estos entregables"
+                >
+                  <RefreshCw size={14} /> ⚡ Sincronizar Etapas Gantt
+                </button>
+              )}
+              <button
+                onClick={handleOpenAdd}
+                className="btn btn-primary"
+                style={{ background: '#7c3aed', borderColor: '#6d28d9', fontSize: '0.825rem', display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '8px' }}
+              >
+                <Plus size={15} /> Nuevo Entregable
+              </button>
+            </div>
           )}
         </div>
       </div>

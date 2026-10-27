@@ -77,6 +77,8 @@ export default function CreateProjectCommercialModal({
   const [pmId, setPmId] = useState('');
   const [proposalUrl, setProposalUrl] = useState('');
   const [googleDriveFolderUrl, setGoogleDriveFolderUrl] = useState('');
+  const [contractUrl, setContractUrl] = useState('');
+  const [contractNumber, setContractNumber] = useState('');
 
   // Cronograma y Días Hábiles
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
@@ -120,6 +122,8 @@ export default function CreateProjectCommercialModal({
         setPmId(editingProject.pm_id || '');
         setProposalUrl(editingProject.proposal_url || '');
         setGoogleDriveFolderUrl(editingProject.google_drive_folder_url || '');
+        setContractUrl(editingProject.contract_url || '');
+        setContractNumber(editingProject.contract_number || '');
         setStartDate(editingProject.delivery_date || editingProject.baseline_start_date || new Date().toISOString().split('T')[0]);
         setDurationWeeks(editingProject.duration_weeks || 4);
         setQuotedBudget(Number(editingProject.quoted_budget) || 0);
@@ -151,6 +155,8 @@ export default function CreateProjectCommercialModal({
         setPmId('');
         setProposalUrl('');
         setGoogleDriveFolderUrl('');
+        setContractUrl('');
+        setContractNumber('');
         setStartDate(new Date().toISOString().split('T')[0]);
         setDurationWeeks(4);
         setQuotedBudget(0);
@@ -321,6 +327,8 @@ export default function CreateProjectCommercialModal({
         pm_id: pmId || null,
         proposal_url: proposalUrl.trim() || null,
         google_drive_folder_url: googleDriveFolderUrl.trim() || null,
+        contract_url: contractUrl.trim() || null,
+        contract_number: contractNumber.trim() || null,
         delivery_date: startDate,
         duration_weeks: durationWeeks,
         end_date: calculatedEndDate,
@@ -779,6 +787,36 @@ export default function CreateProjectCommercialModal({
                         value={googleDriveFolderUrl} 
                         onChange={e => setGoogleDriveFolderUrl(e.target.value)} 
                         placeholder="https://drive.google.com/drive/folders/..." 
+                        style={{ padding: '14px', borderRadius: '14px', border: '2px solid #f1f5f9' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Contrato de Servicios (Opcional) */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
+                    <div className="form-group">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>LINK DE CONTRATO (GOOGLE DRIVE / PDF)</label>
+                        <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>OPCIONAL</span>
+                      </div>
+                      <input 
+                        type="url" 
+                        className="form-input" 
+                        value={contractUrl} 
+                        onChange={e => setContractUrl(e.target.value)} 
+                        placeholder="https://drive.google.com/... o enlace PDF" 
+                        style={{ padding: '14px', borderRadius: '14px', border: '2px solid #f1f5f9' }}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em' }}>FOLIO / N° DE CONTRATO (OPCIONAL)</label>
+                      <input 
+                        type="text" 
+                        className="form-input" 
+                        value={contractNumber} 
+                        onChange={e => setContractNumber(e.target.value)} 
+                        placeholder="Ej. CT-2024-001" 
                         style={{ padding: '14px', borderRadius: '14px', border: '2px solid #f1f5f9' }}
                       />
                     </div>

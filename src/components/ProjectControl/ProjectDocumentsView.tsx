@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   FileText,
   Folder, 
@@ -8,7 +8,8 @@ import {
   Receipt, 
   Edit2, 
   Check, 
-  X
+  X,
+  FileCheck
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -32,7 +33,35 @@ export default function ProjectDocumentsView({
   const [driveUrl, setDriveUrl] = useState(project?.google_drive_folder_url || '');
   const [editingProposal, setEditingProposal] = useState(false);
   const [proposalUrl, setProposalUrl] = useState(project?.proposal_url || '');
+  const [editingContract, setEditingContract] = useState(false);
+  const [contractUrl, setContractUrl] = useState(project?.contract_url || '');
+  const [contractNumber, setContractNumber] = useState(project?.contract_number || '');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (project) {
+      setDriveUrl(project.google_drive_folder_url || '');
+      setProposalUrl(project.proposal_url || '');
+      
+      // Fallback a localStorage si la columna contract_url aún no se refleja en la consulta
+      let cUrl = project.contract_url || '';
+      let cNum = project.contract_number || '';
+      if (!cUrl && projectId) {
+        try {
+          const cachedRaw = localStorage.getItem(`project_contract_${projectId}`);
+          if (cachedRaw) {
+            const cached = JSON.parse(cachedRaw);
+            cUrl = cached.contractUrl || '';
+            cNum = cached.contractNumber || '';
+          }
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+      setContractUrl(cUrl);
+      setContractNumber(cNum);
+    }
+  }, [project, projectId]);
 
   const handleSaveDriveUrl = async () => {
     setSaving(true);
@@ -64,6 +93,48 @@ export default function ProjectDocumentsView({
       if (error) throw error;
       showNotification('success', 'Enlace de propuesta comercial actualizado');
       setEditingProposal(false);
+      if (onDataUpdated) onDataUpdated();
+    } catch (err: any) {
+      showNotification('error', err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveContract = async () => {
+    setSaving(true);
+    try {
+      const payload: Record<string, any> = {
+        contract_url: contractUrl.trim() || null,
+        contract_number: contractNumber.trim() || null
+      };
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { error } = await supabase
+          .from('projects')
+          .update(payload)
+          .eq('id', projectId);
+
+        if (!error) break;
+        const missing = error.message?.match(/Could not find the '([^']+)' column/i);
+        if (missing && missing[1] in payload) {
+          delete payload[missing[1]];
+          continue;
+        }
+        break;
+      }
+
+      try {
+        localStorage.setItem(`project_contract_${projectId}`, JSON.stringify({
+          contractUrl: contractUrl.trim(),
+          contractNumber: contractNumber.trim()
+        }));
+      } catch (e) {
+        console.warn(e);
+      }
+
+      showNotification('success', 'Contrato de servicios actualizado');
+      setEditingContract(false);
       if (onDataUpdated) onDataUpdated();
     } catch (err: any) {
       showNotification('error', err.message);
@@ -231,6 +302,101 @@ export default function ProjectDocumentsView({
                 style={{ width: '100%', justifyContent: 'center', borderRadius: '10px', height: '38px', fontSize: '0.85rem', fontWeight: 700, border: '2px dashed #cbd5e1' }}
               >
                 <Plus size={15} style={{ marginRight: '4px' }} /> Adjuntar Enlace de Propuesta
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Card 3: Contrato de Servicios (Opcional) */}
+        <div className="form-card" style={{ background: 'white', borderRadius: '16px', border: '1px solid #e2e8f0', padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <FileCheck size={22} />
+                </div>
+                <span style={{ background: '#f1f5f9', color: '#475569', fontSize: '0.7rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px' }}>
+                  OPCIONAL
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingContract(!editingContract)}
+                style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', padding: '4px' }}
+                title="Editar contrato"
+              >
+                <Edit2 size={16} />
+              </button>
+            </div>
+            <h3 style={{ margin: '0 0 6px 0', fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>
+              Contrato de Servicios
+            </h3>
+            <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>
+              Contrato marco o específico de servicios. El proyecto puede iniciar con PO o con Contrato.
+            </p>
+            {contractNumber && !editingContract && (
+              <div style={{ marginTop: '8px', fontSize: '0.75rem', fontWeight: 700, color: '#059669', background: '#ecfdf5', padding: '4px 8px', borderRadius: '6px', display: 'inline-block' }}>
+                Folio: {contractNumber}
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: '16px' }}>
+            {editingContract ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ height: '34px', borderRadius: '8px', fontSize: '0.8rem', padding: '0 10px' }}
+                  placeholder="N° / Folio de Contrato (ej. CT-2024-001)"
+                  value={contractNumber}
+                  onChange={(e) => setContractNumber(e.target.value)}
+                />
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="url"
+                    className="form-input"
+                    style={{ flex: 1, height: '36px', borderRadius: '8px', fontSize: '0.8rem', padding: '0 10px' }}
+                    placeholder="URL del Contrato (Drive o PDF)..."
+                    value={contractUrl}
+                    onChange={(e) => setContractUrl(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveContract}
+                    disabled={saving}
+                    className="btn btn-primary"
+                    style={{ padding: '0 12px', borderRadius: '8px', fontSize: '0.75rem', fontWeight: 700 }}
+                  >
+                    <Check size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingContract(false)}
+                    style={{ background: '#f1f5f9', border: 'none', borderRadius: '8px', padding: '0 8px', cursor: 'pointer' }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            ) : contractUrl ? (
+              <a
+                href={contractUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-secondary"
+                style={{ width: '100%', justifyContent: 'center', borderRadius: '10px', height: '38px', fontSize: '0.85rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', color: '#059669', borderColor: '#a7f3d0' }}
+              >
+                <ExternalLink size={15} /> Abrir Contrato de Servicios
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditingContract(true)}
+                className="btn btn-secondary"
+                style={{ width: '100%', justifyContent: 'center', borderRadius: '10px', height: '38px', fontSize: '0.85rem', fontWeight: 700, border: '2px dashed #cbd5e1' }}
+              >
+                <Plus size={15} style={{ marginRight: '4px' }} /> + Adjuntar Contrato (Opcional)
               </button>
             )}
           </div>

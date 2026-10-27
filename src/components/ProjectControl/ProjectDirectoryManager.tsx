@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   Users, 
   Plus, 
@@ -6,10 +6,12 @@ import {
   Mail, 
   Phone, 
   Globe, 
-  X,
-  Building2,
-  UserCheck,
-  Edit2
+  X, 
+  Building2, 
+  UserCheck, 
+  Edit2,
+  Search,
+  ChevronDown
 } from 'lucide-react';
 import { supabase, supabaseSecondary } from '../../lib/supabase';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -58,6 +60,9 @@ export default function ProjectDirectoryManager({
 
   // Catálogo de Talent Flow (Store Intelligence)
   const [storeTalentProfiles, setStoreTalentProfiles] = useState<any[]>([]);
+  const [talentSearchQuery, setTalentSearchQuery] = useState('');
+  const [showTalentDropdown, setShowTalentDropdown] = useState(false);
+  const [selectedTalentProfileId, setSelectedTalentProfileId] = useState('');
 
   // Formulario nuevo / edición de miembro
   const [showAddForm, setShowAddForm] = useState(false);
@@ -70,6 +75,17 @@ export default function ProjectDirectoryManager({
   const [secondaryRoleTitle, setSecondaryRoleTitle] = useState('');
   const [country, setCountry] = useState('México');
   const [saving, setSaving] = useState(false);
+
+  // Filtrado reactivo en tiempo real de perfiles de Talent Flow
+  const filteredTalentProfiles = useMemo(() => {
+    if (!talentSearchQuery.trim()) return storeTalentProfiles;
+    const q = talentSearchQuery.toLowerCase().trim();
+    return storeTalentProfiles.filter(p => 
+      (p.full_name && p.full_name.toLowerCase().includes(q)) ||
+      (p.email && p.email.toLowerCase().includes(q)) ||
+      (p.job_title && p.job_title.toLowerCase().includes(q))
+    );
+  }, [storeTalentProfiles, talentSearchQuery]);
 
   useEffect(() => {
     fetchDirectory();
@@ -118,10 +134,11 @@ export default function ProjectDirectoryManager({
     }
   };
 
-  const handleSelectTalentProfile = (profileId: string) => {
-    if (!profileId) return;
-    const p = storeTalentProfiles.find(item => item.id === profileId);
+  const handleSelectTalentProfile = (p: any) => {
     if (!p) return;
+    setSelectedTalentProfileId(p.id);
+    setTalentSearchQuery(p.full_name || '');
+    setShowTalentDropdown(false);
     setName(p.full_name || '');
     setEmail(p.email || '');
     setPhone(p.phone || p.phone_personal || p.phone_office || '');
@@ -129,6 +146,7 @@ export default function ProjectDirectoryManager({
     if (p.birth_country && COUNTRIES.includes(p.birth_country)) {
       setCountry(p.birth_country);
     }
+    showNotification('info', `Datos autocompletados desde Talent: ${p.full_name}`);
   };
 
   const handleStartEdit = (member: DirectoryMember) => {
@@ -140,6 +158,7 @@ export default function ProjectDirectoryManager({
     setRoleTitle(member.role_title);
     setSecondaryRoleTitle(member.secondary_role_title || '');
     setCountry(member.location_country || 'México');
+    setTalentSearchQuery(member.name);
     setShowAddForm(true);
   };
 
@@ -150,7 +169,11 @@ export default function ProjectDirectoryManager({
     setPhone('');
     setRoleTitle('');
     setSecondaryRoleTitle('');
+    setCountry('México');
     setGroupType('Store');
+    setTalentSearchQuery('');
+    setSelectedTalentProfileId('');
+    setShowTalentDropdown(false);
     setShowAddForm(false);
   };
 
@@ -373,27 +396,144 @@ export default function ProjectDirectoryManager({
             <span>{editingMember ? `Editar Miembro: ${editingMember.name}` : 'Nuevo Registro en Directorio del Proyecto'}</span>
           </div>
 
-          {/* Si es posición Store, desplegar catálogo de Talent */}
+          {/* Si es posición Store, desplegar buscador interactivo de Talent */}
           {groupType === 'Store' && (
-            <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '14px 16px', borderRadius: '12px', marginBottom: '18px' }}>
-              <label style={{ fontSize: '0.72rem', fontWeight: 800, color: '#6d28d9', display: 'block', marginBottom: '6px' }}>
-                🏢 SELECCIONAR DEL DIRECTORIO TALENT (STORE INTELLIGENCE)
-              </label>
-              <select
-                className="form-input"
-                onChange={e => handleSelectTalentProfile(e.target.value)}
-                defaultValue=""
-                style={{ width: '100%', height: '40px', borderRadius: '10px', fontSize: '0.85rem', fontWeight: 700, borderColor: '#c4b5fd', background: 'white' }}
-              >
-                <option value="">Buscar y autocompletar desde Talent ({storeTalentProfiles.length} colaboradores)...</option>
-                {storeTalentProfiles.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.full_name} — {p.job_title || 'Store'} ({p.email})
-                  </option>
-                ))}
-              </select>
-              <div style={{ fontSize: '0.72rem', color: '#6d28d9', marginTop: '4px' }}>
-                ⚡ Al seleccionar un colaborador, se llenan automáticamente Nombre, Correo, Teléfono y Rol. Puedes ajustar cualquier campo a continuación.
+            <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', padding: '16px', borderRadius: '12px', marginBottom: '18px', position: 'relative' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <label style={{ fontSize: '0.74rem', fontWeight: 800, color: '#6d28d9', margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Search size={14} /> BUSCADOR INTERACTIVO TALENT (STORE INTELLIGENCE) — {storeTalentProfiles.length} COLABORADORES
+                </label>
+                {talentSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTalentSearchQuery('');
+                      setSelectedTalentProfileId('');
+                    }}
+                    style={{ background: 'none', border: 'none', fontSize: '0.72rem', color: '#6d28d9', cursor: 'pointer', textDecoration: 'underline', fontWeight: 700 }}
+                  >
+                    ✕ Limpiar búsqueda
+                  </button>
+                )}
+              </div>
+
+              {/* Input tipeable con autocompletado en tiempo real */}
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="🔍 Escribe nombre, cargo o correo para filtrar colaboradores..."
+                  value={talentSearchQuery}
+                  onFocus={() => setShowTalentDropdown(true)}
+                  onChange={e => {
+                    setTalentSearchQuery(e.target.value);
+                    setShowTalentDropdown(true);
+                  }}
+                  style={{
+                    width: '100%',
+                    height: '42px',
+                    borderRadius: '10px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    borderColor: '#c4b5fd',
+                    background: 'white',
+                    paddingLeft: '14px',
+                    paddingRight: '36px'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowTalentDropdown(!showTalentDropdown)}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: '#6d28d9',
+                    cursor: 'pointer',
+                    padding: '4px'
+                  }}
+                >
+                  {showTalentDropdown ? <X size={16} /> : <ChevronDown size={16} />}
+                </button>
+
+                {/* Lista interactiva flotante de perfiles de Talent Flow */}
+                {showTalentDropdown && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '46px',
+                      left: 0,
+                      right: 0,
+                      background: 'white',
+                      borderRadius: '12px',
+                      boxShadow: '0 12px 28px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.08)',
+                      border: '1px solid #ddd6fe',
+                      maxHeight: '260px',
+                      overflowY: 'auto',
+                      zIndex: 1000,
+                      padding: '6px'
+                    }}
+                  >
+                    {filteredTalentProfiles.length === 0 ? (
+                      <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontSize: '0.82rem' }}>
+                        No se encontraron colaboradores en Talent que coincidan con "{talentSearchQuery}"
+                      </div>
+                    ) : (
+                      filteredTalentProfiles.map(p => {
+                        const isSelected = p.id === selectedTalentProfileId;
+                        return (
+                          <div
+                            key={p.id}
+                            onClick={() => handleSelectTalentProfile(p)}
+                            style={{
+                              padding: '10px 14px',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              background: isSelected ? '#ede9fe' : 'transparent',
+                              transition: 'background 0.15s ease',
+                              borderBottom: '1px solid #f8fafc'
+                            }}
+                            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#f5f3ff'; }}
+                            onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0, marginRight: '10px' }}>
+                              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#1e293b' }}>
+                                {p.full_name}
+                              </div>
+                              <div style={{ fontSize: '0.74rem', color: '#64748b', display: 'flex', gap: '10px', marginTop: '2px', flexWrap: 'wrap' }}>
+                                <span>📧 {p.email}</span>
+                                {(p.phone || p.phone_personal || p.phone_office) && (
+                                  <span>📞 {p.phone || p.phone_personal || p.phone_office}</span>
+                                )}
+                              </div>
+                            </div>
+                            <span style={{
+                              background: '#ede9fe',
+                              color: '#6d28d9',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              padding: '4px 8px',
+                              borderRadius: '6px',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              {p.job_title || 'Store'}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ fontSize: '0.72rem', color: '#6d28d9', marginTop: '6px' }}>
+                ⚡ Filtra por nombre, correo o rol. Al seleccionar, se autocompletarán los campos de abajo y podrás ajustar cualquier dato.
               </div>
             </div>
           )}
