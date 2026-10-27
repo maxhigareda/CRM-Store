@@ -96,10 +96,16 @@ export default function ProjectDirectoryManager({
     try {
       const { data } = await supabaseSecondary
         .from('profiles')
-        .select('id, full_name, email, phone, phone_office, phone_personal, job_title, birth_country, role')
+        .select('id, full_name, email, phone, phone_office, phone_personal, job_title, birth_country, role, status')
         .order('full_name');
       if (data && data.length > 0) {
-        setStoreTalentProfiles(data);
+        // Filtrar únicamente los colaboradores con estatus "Activo" (excluir "Baja", inactivos, etc.)
+        const activeProfiles = data.filter(p => {
+          if (!p.status) return true;
+          const s = String(p.status).toLowerCase().trim();
+          return s === 'activo';
+        });
+        setStoreTalentProfiles(activeProfiles);
       }
     } catch (e) {
       console.warn('Error loading Talent Flow profiles from secondary supabase:', e);
